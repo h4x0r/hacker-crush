@@ -329,16 +329,29 @@ class Renderer:
         self.screen.blit(text, text_rect)
 
     def draw_hud_logo(self) -> None:
-        """Draw logo in game HUD - positioned in top area to avoid grid overlap."""
-        # Grid extends from y=80 to y=592, so we put logo in top center
-        # between the score (left) and time/moves (right)
-        if self.logo:
-            logo_size = 32
-            logo_x = WINDOW_WIDTH // 2 - logo_size // 2
-            logo_y = 24
-            self.screen.blit(pygame.transform.smoothscale(self.logo, (logo_size, logo_size)),
-                           (logo_x, logo_y))
-            self.game_logo_rect = pygame.Rect(logo_x, logo_y, logo_size, logo_size)
+        """Draw marketing logo as subtle watermark inside the game board."""
+        logo_to_use = self.menu_logo or self.logo
+        if logo_to_use:
+            # Scale logo to fit nicely in bottom of grid area
+            logo_rect = logo_to_use.get_rect()
+            # Scale to ~60% of grid width while maintaining aspect ratio
+            target_width = int(GRID_COLS * CELL_SIZE * 0.5)
+            scale = target_width / logo_rect.width
+            target_height = int(logo_rect.height * scale)
+
+            scaled_logo = pygame.transform.smoothscale(logo_to_use, (target_width, target_height))
+
+            # Position at bottom center of grid
+            grid_center_x = GRID_OFFSET_X + (GRID_COLS * CELL_SIZE) // 2
+            grid_bottom = GRID_OFFSET_Y + GRID_ROWS * CELL_SIZE
+            logo_x = grid_center_x - target_width // 2
+            logo_y = grid_bottom - target_height - 10  # 10px from bottom
+
+            # Make semi-transparent watermark
+            scaled_logo.set_alpha(60)
+            self.screen.blit(scaled_logo, (logo_x, logo_y))
+
+            self.game_logo_rect = pygame.Rect(logo_x, logo_y, target_width, target_height)
         else:
             self.game_logo_rect = None
 
@@ -484,20 +497,20 @@ class Renderer:
         else:
             self.menu_logo_rect = None
 
-        # Draw title with glitch effect (position below logo with gap)
+        # Draw title with glitch effect (position below logo with generous gap)
         title_text = self.title_font.render(f"> {title}_", True, COLOR_PRIMARY)
         title_height = title_text.get_height()
-        title_y = logo_bottom + 10 + title_height // 2  # Gap + half title height for centering
+        title_y = logo_bottom + 35 + title_height // 2  # Generous gap below logo
         title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, title_y))
         self.screen.blit(title_text, title_rect)
 
         # Draw subtitle
         subtitle = self.small_font.render("[ SELECT OPERATION MODE ]", True, COLOR_ACCENT)
-        subtitle_rect = subtitle.get_rect(center=(WINDOW_WIDTH // 2, title_y + 35))
+        subtitle_rect = subtitle.get_rect(center=(WINDOW_WIDTH // 2, title_y + 45))
         self.screen.blit(subtitle, subtitle_rect)
 
         # Draw options - calculate spacing to fit 3 options nicely
-        options_area_top = title_y + 60
+        options_area_top = title_y + 85
         options_area_bottom = WINDOW_HEIGHT - 70  # Leave room for controls
         available_height = options_area_bottom - options_area_top
         spacing = min(80, available_height // max(len(options), 1))

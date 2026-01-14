@@ -1,282 +1,300 @@
 #!/usr/bin/env python3
-"""Generate Matrix-style cyberpunk sound effects for Hacker Crush."""
+"""Generate moody Matrix-style cyberpunk sound effects for Hacker Crush.
+
+Design philosophy: Dark, atmospheric, low-frequency, ominous.
+NOT arcade beeps - think slow digital ambience with reverb.
+"""
 
 import numpy as np
 from scipy.io import wavfile
+from scipy.signal import butter, lfilter
 import os
 
 SAMPLE_RATE = 44100
 
 
-def normalize(audio: np.ndarray) -> np.ndarray:
+def normalize(audio: np.ndarray, level: float = 0.7) -> np.ndarray:
     """Normalize audio to 16-bit range."""
-    audio = audio / np.max(np.abs(audio)) * 0.8
+    if np.max(np.abs(audio)) > 0:
+        audio = audio / np.max(np.abs(audio)) * level
     return (audio * 32767).astype(np.int16)
 
 
-def envelope(length: int, attack: float = 0.01, decay: float = 0.1,
-             sustain: float = 0.7, release: float = 0.2) -> np.ndarray:
-    """Create ADSR envelope."""
-    total = attack + decay + release
-    samples = int(length)
-    env = np.zeros(samples)
-
-    attack_samples = int(attack * samples / total)
-    decay_samples = int(decay * samples / total)
-    release_samples = samples - attack_samples - decay_samples
-
-    # Attack
-    env[:attack_samples] = np.linspace(0, 1, attack_samples)
-    # Decay
-    env[attack_samples:attack_samples + decay_samples] = np.linspace(1, sustain, decay_samples)
-    # Sustain + Release
-    env[attack_samples + decay_samples:] = np.linspace(sustain, 0, release_samples)
-
-    return env
+def lowpass_filter(audio: np.ndarray, cutoff: float = 2000) -> np.ndarray:
+    """Apply lowpass filter for darker tone."""
+    nyq = SAMPLE_RATE / 2
+    b, a = butter(2, cutoff / nyq, btype='low')
+    return lfilter(b, a, audio)
 
 
-def freq_sweep(duration: float, start_freq: float, end_freq: float) -> np.ndarray:
-    """Create frequency sweep (chirp)."""
+def add_reverb(audio: np.ndarray, decay: float = 0.4, delays: int = 5) -> np.ndarray:
+    """Add simple reverb effect for atmosphere."""
+    result = audio.copy().astype(float)
+    for i in range(1, delays + 1):
+        delay_samples = int(0.03 * i * SAMPLE_RATE)  # 30ms increments
+        delayed = np.zeros(len(audio) + delay_samples)
+        delayed[delay_samples:delay_samples + len(audio)] = audio * (decay ** i)
+        result = np.pad(result, (0, max(0, len(delayed) - len(result))))
+        delayed = np.pad(delayed, (0, max(0, len(result) - len(delayed))))
+        result += delayed[:len(result)]
+    return result
+
+
+def dark_drone(duration: float, base_freq: float = 60) -> np.ndarray:
+    """Create dark droning bass tone."""
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
-    freq = np.linspace(start_freq, end_freq, len(t))
+    # Low fundamental with subtle movement
+    lfo = 1 + 0.1 * np.sin(2 * np.pi * 0.5 * t)  # Slow wobble
+    audio = np.sin(2 * np.pi * base_freq * lfo * t)
+    # Add subtle harmonics
+    audio += 0.3 * np.sin(2 * np.pi * base_freq * 2 * t)
+    audio += 0.1 * np.sin(2 * np.pi * base_freq * 3 * t)
+    return audio
+
+
+def digital_texture(duration: float, intensity: float = 0.1) -> np.ndarray:
+    """Subtle digital grain texture."""
+    samples = int(SAMPLE_RATE * duration)
+    # Very subtle, filtered noise
+    noise = np.random.random(samples) * 2 - 1
+    noise = lowpass_filter(noise, 800)
+    return noise * intensity
+
+
+def slow_sweep(duration: float, start_freq: float, end_freq: float) -> np.ndarray:
+    """Slow, dark frequency sweep."""
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
+    # Exponential sweep for more natural feel
+    freq = start_freq * (end_freq / start_freq) ** (t / duration)
     phase = 2 * np.pi * np.cumsum(freq) / SAMPLE_RATE
     return np.sin(phase)
 
 
-def digital_noise(duration: float, intensity: float = 0.3) -> np.ndarray:
-    """Create digital-sounding noise."""
-    samples = int(SAMPLE_RATE * duration)
-    # Quantized noise for digital feel
-    noise = np.random.random(samples) * 2 - 1
-    # Bitcrush effect
-    bits = 4
-    noise = np.round(noise * (2**bits)) / (2**bits)
-    return noise * intensity
+def fade_envelope(length: int, fade_in: float = 0.1, fade_out: float = 0.3) -> np.ndarray:
+    """Simple fade in/out envelope."""
+    env = np.ones(length)
+    fade_in_samples = int(fade_in * length)
+    fade_out_samples = int(fade_out * length)
+
+    env[:fade_in_samples] = np.linspace(0, 1, fade_in_samples)
+    env[-fade_out_samples:] = np.linspace(1, 0, fade_out_samples)
+    return env
 
 
 def generate_swap():
-    """Quick digital data transfer whoosh."""
-    duration = 0.15
+    """Dark whoosh - like data passing through the Matrix."""
+    duration = 0.25
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Fast frequency sweep (high to low)
-    sweep = freq_sweep(duration, 2000, 400)
+    # Low filtered sweep
+    sweep = slow_sweep(duration, 150, 80)
+    sweep = lowpass_filter(sweep, 400)
 
-    # Add digital artifacts
-    digital = digital_noise(duration, 0.2)
+    # Subtle texture
+    texture = digital_texture(duration, 0.05)
 
-    # Quick envelope
-    env = envelope(len(t), attack=0.01, decay=0.05, sustain=0.3, release=0.1)
+    # Smooth envelope
+    env = fade_envelope(len(t), 0.05, 0.4)
 
-    audio = (sweep * 0.7 + digital * 0.3) * env
-    return normalize(audio)
+    audio = (sweep * 0.8 + texture) * env
+    audio = add_reverb(audio, 0.3, 3)
+
+    return normalize(audio[:int(SAMPLE_RATE * 0.3)])
 
 
 def generate_match():
-    """Binary beep sequence - code compiling."""
-    duration = 0.2
-    t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
-
-    # Three quick beeps at different frequencies
-    audio = np.zeros(len(t))
-    beep_len = len(t) // 4
-
-    freqs = [880, 1100, 1320]  # Rising sequence
-    for i, freq in enumerate(freqs):
-        start = i * beep_len
-        end = start + beep_len
-        if end <= len(t):
-            beep_t = np.linspace(0, beep_len / SAMPLE_RATE, beep_len)
-            beep = np.sin(2 * np.pi * freq * beep_t)
-            beep *= np.exp(-beep_t * 20)  # Quick decay
-            audio[start:end] += beep
-
-    # Add subtle digital texture
-    audio += digital_noise(duration, 0.1)
-
-    return normalize(audio)
-
-
-def generate_match_big():
-    """Successful hack confirmation - deeper, resonant."""
-    duration = 0.35
-    t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
-
-    # Base tone with harmonics
-    base_freq = 220
-    audio = np.sin(2 * np.pi * base_freq * t) * 0.5
-    audio += np.sin(2 * np.pi * base_freq * 2 * t) * 0.3
-    audio += np.sin(2 * np.pi * base_freq * 3 * t) * 0.2
-
-    # Rising sweep overlay
-    sweep = freq_sweep(duration, 400, 1200) * 0.4
-
-    # Envelope
-    env = envelope(len(t), attack=0.02, decay=0.1, sustain=0.5, release=0.3)
-
-    audio = (audio + sweep) * env
-    audio += digital_noise(duration, 0.15)
-
-    return normalize(audio)
-
-
-def generate_striped():
-    """Scanning line sweep - laser sound."""
-    duration = 0.25
-    t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
-
-    # Sharp sweep
-    sweep = freq_sweep(duration, 300, 2500)
-
-    # Add harmonic for "laser" quality
-    sweep2 = freq_sweep(duration, 600, 5000) * 0.3
-
-    # Envelope with sharp attack
-    env = envelope(len(t), attack=0.005, decay=0.05, sustain=0.4, release=0.3)
-
-    audio = (sweep + sweep2) * env
-    return normalize(audio)
-
-
-def generate_wrapped():
-    """Data decompression burst - expanding pulse."""
+    """Subtle confirmation - like code accepting input."""
     duration = 0.3
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Expanding frequency (low to high burst)
-    sweep = freq_sweep(duration, 150, 800)
+    # Soft tone cluster (not beepy)
+    freq = 220
+    audio = np.sin(2 * np.pi * freq * t) * 0.5
+    audio += np.sin(2 * np.pi * freq * 1.5 * t) * 0.3  # Fifth
+    audio += np.sin(2 * np.pi * freq * 2 * t) * 0.2
 
-    # Pulse modulation
-    pulse_freq = 30
-    pulse = (np.sin(2 * np.pi * pulse_freq * t) > 0).astype(float)
+    # Filter for darkness
+    audio = lowpass_filter(audio, 600)
 
-    # Impact sound
-    impact = np.exp(-t * 15) * np.sin(2 * np.pi * 100 * t)
+    # Gentle envelope
+    env = fade_envelope(len(t), 0.02, 0.5)
+    audio *= env
 
-    # Envelope
-    env = envelope(len(t), attack=0.01, decay=0.15, sustain=0.3, release=0.2)
-
-    audio = (sweep * pulse * 0.5 + impact * 0.5 + digital_noise(duration, 0.2)) * env
-    return normalize(audio)
+    audio = add_reverb(audio, 0.4, 4)
+    return normalize(audio[:int(SAMPLE_RATE * 0.4)])
 
 
-def generate_color_bomb():
-    """System breach cascade - layered digital explosion."""
+def generate_match_big():
+    """Deeper resonance - successful breach."""
     duration = 0.5
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Multiple sweeps cascading
-    audio = np.zeros(len(t))
+    # Deep bass hit with slow release
+    bass = dark_drone(duration, 55)
 
-    # Main impact
-    impact = np.exp(-t * 8) * np.sin(2 * np.pi * 80 * t)
-    audio += impact * 0.4
+    # Subtle rising undertone
+    rise = slow_sweep(duration, 80, 200) * 0.3
+    rise = lowpass_filter(rise, 500)
 
-    # Cascading sweeps
-    for i, (start_f, end_f) in enumerate([(200, 2000), (400, 3000), (600, 4000)]):
-        delay = int(i * 0.03 * SAMPLE_RATE)
-        sweep_dur = duration - i * 0.03
-        if sweep_dur > 0:
-            sweep = freq_sweep(sweep_dur, start_f, end_f)
-            sweep *= np.exp(-np.linspace(0, sweep_dur, len(sweep)) * 5)
-            audio[delay:delay + len(sweep)] += sweep * 0.3
+    audio = bass * 0.6 + rise * 0.4
 
-    # Heavy digital texture
-    audio += digital_noise(duration, 0.25)
-
-    # Envelope
-    env = envelope(len(t), attack=0.01, decay=0.2, sustain=0.4, release=0.3)
+    # Long decay envelope
+    env = fade_envelope(len(t), 0.01, 0.6)
     audio *= env
 
-    return normalize(audio)
+    audio = add_reverb(audio, 0.5, 5)
+    return normalize(audio[:int(SAMPLE_RATE * 0.7)])
+
+
+def generate_striped():
+    """Line activation - scanning through the Matrix."""
+    duration = 0.35
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
+
+    # Filtered sweep with resonance
+    sweep = slow_sweep(duration, 100, 400)
+    sweep = lowpass_filter(sweep, 800)
+
+    # Add subtle pulsing
+    pulse = 1 + 0.2 * np.sin(2 * np.pi * 8 * t)
+    audio = sweep * pulse
+
+    # Texture layer
+    audio += digital_texture(duration, 0.08)
+
+    env = fade_envelope(len(t), 0.02, 0.4)
+    audio *= env
+
+    audio = add_reverb(audio, 0.4, 4)
+    return normalize(audio[:int(SAMPLE_RATE * 0.45)])
+
+
+def generate_wrapped():
+    """Implosion/explosion - wrapped candy detonation."""
+    duration = 0.4
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
+
+    # Deep thump
+    thump = np.exp(-t * 8) * np.sin(2 * np.pi * 50 * t)
+
+    # Expanding low rumble
+    rumble = dark_drone(duration, 40)
+    rumble *= np.linspace(0.2, 1, len(t)) * np.exp(-t * 3)
+
+    audio = thump * 0.6 + rumble * 0.4
+    audio = lowpass_filter(audio, 500)
+
+    env = fade_envelope(len(t), 0.01, 0.5)
+    audio *= env
+
+    audio = add_reverb(audio, 0.5, 5)
+    return normalize(audio[:int(SAMPLE_RATE * 0.55)])
+
+
+def generate_color_bomb():
+    """System breach - ominous cascade."""
+    duration = 0.7
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
+
+    # Deep impact
+    impact = np.exp(-t * 5) * np.sin(2 * np.pi * 35 * t)
+
+    # Slow descending sweep (ominous)
+    sweep = slow_sweep(duration, 300, 50)
+    sweep = lowpass_filter(sweep, 600)
+
+    # Layered drones
+    drone = dark_drone(duration, 45) * np.exp(-t * 2)
+
+    audio = impact * 0.4 + sweep * 0.3 + drone * 0.3
+    audio += digital_texture(duration, 0.1)
+
+    env = fade_envelope(len(t), 0.01, 0.4)
+    audio *= env
+
+    audio = add_reverb(audio, 0.5, 6)
+    return normalize(audio[:int(SAMPLE_RATE * 0.9)])
 
 
 def generate_combo():
-    """Escalating pitch sequence - system overload."""
-    duration = 0.25
+    """Building intensity - cascading through layers."""
+    duration = 0.35
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Rising tone sequence
-    audio = np.zeros(len(t))
-    num_tones = 5
-    tone_len = len(t) // num_tones
+    # Rising filtered tone
+    sweep = slow_sweep(duration, 80, 250)
+    sweep = lowpass_filter(sweep, 700)
 
-    base_freq = 440
-    for i in range(num_tones):
-        freq = base_freq * (1.2 ** i)  # Exponential rise
-        start = i * tone_len
-        end = min(start + tone_len, len(t))
+    # Intensity builds
+    intensity = np.linspace(0.3, 1, len(t))
+    audio = sweep * intensity
 
-        tone_t = np.linspace(0, (end - start) / SAMPLE_RATE, end - start)
-        tone = np.sin(2 * np.pi * freq * tone_t)
-        tone *= np.exp(-tone_t * 15)
-        audio[start:end] += tone
+    # Add subtle urgency without being shrill
+    pulse = 1 + 0.15 * np.sin(2 * np.pi * 6 * t)
+    audio *= pulse
 
-    # Add urgency with noise
-    audio += digital_noise(duration, 0.15)
+    env = fade_envelope(len(t), 0.02, 0.3)
+    audio *= env
 
-    return normalize(audio)
+    audio = add_reverb(audio, 0.4, 4)
+    return normalize(audio[:int(SAMPLE_RATE * 0.45)])
 
 
 def generate_invalid():
-    """Access Denied - sharp rejection buzz."""
-    duration = 0.2
+    """Rejection - dark denial tone."""
+    duration = 0.25
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Harsh buzzing tone
-    freq = 180
-    audio = np.sign(np.sin(2 * np.pi * freq * t))  # Square wave
+    # Low dissonant tone (not harsh buzz)
+    freq = 80
+    audio = np.sin(2 * np.pi * freq * t)
+    # Dissonant interval
+    audio += np.sin(2 * np.pi * freq * 1.06 * t) * 0.7  # Minor second
 
-    # Add dissonant overtone
-    audio += np.sign(np.sin(2 * np.pi * freq * 1.5 * t)) * 0.5
+    # Filter heavily
+    audio = lowpass_filter(audio, 300)
 
-    # Two-tone pattern (like error beep)
-    gate = (t < duration / 2).astype(float) * 0.7 + (t >= duration / 2).astype(float) * 1.0
-    audio *= gate
+    # Two pulses
+    pulse1 = np.exp(-((t - 0.05) ** 2) / 0.002)
+    pulse2 = np.exp(-((t - 0.15) ** 2) / 0.002)
+    audio *= (pulse1 + pulse2 * 0.7)
 
-    # Quick decay envelope
-    env = envelope(len(t), attack=0.005, decay=0.05, sustain=0.8, release=0.1)
-    audio *= env * 0.5  # Lower volume - harsh sound
-
-    return normalize(audio)
+    audio = add_reverb(audio, 0.3, 3)
+    return normalize(audio[:int(SAMPLE_RATE * 0.35)], 0.6)
 
 
 def generate_game_over():
-    """System disconnect - powering down sequence."""
-    duration = 1.0
+    """System shutdown - slow, ominous fadeout."""
+    duration = 1.5
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Descending tones
-    audio = np.zeros(len(t))
+    # Descending drone
+    freq_start, freq_end = 120, 30
+    freq = freq_start * (freq_end / freq_start) ** (t / duration)
+    phase = 2 * np.pi * np.cumsum(freq) / SAMPLE_RATE
+    drone = np.sin(phase)
 
-    # Main descending sweep
-    sweep = freq_sweep(duration, 800, 50)
-    audio += sweep * 0.4
+    # Add dark harmonics
+    drone += 0.3 * np.sin(phase * 2)
+    drone = lowpass_filter(drone, 400)
 
-    # Layered descending beeps
-    num_beeps = 6
-    beep_len = len(t) // num_beeps
+    # Pulsing that slows down
+    pulse_freq = 4 * (1 - t / duration * 0.8)  # Slowing pulse
+    pulse = 0.7 + 0.3 * np.sin(2 * np.pi * np.cumsum(pulse_freq) / SAMPLE_RATE)
 
-    for i in range(num_beeps):
-        freq = 600 * (0.7 ** i)  # Descending
-        start = i * beep_len
-        end = min(start + beep_len, len(t))
+    audio = drone * pulse
 
-        beep_t = np.linspace(0, (end - start) / SAMPLE_RATE, end - start)
-        beep = np.sin(2 * np.pi * freq * beep_t)
-        beep *= np.exp(-beep_t * 8)
-        audio[start:end] += beep * 0.5
+    # Add texture that fades
+    texture = digital_texture(duration, 0.15)
+    texture *= np.linspace(1, 0, len(t))
+    audio += texture
 
-    # Fading digital noise
-    noise = digital_noise(duration, 0.3)
-    noise *= np.linspace(1, 0, len(t))
-    audio += noise
-
-    # Long fadeout envelope
-    env = envelope(len(t), attack=0.01, decay=0.1, sustain=0.6, release=0.5)
+    # Long fadeout
+    env = fade_envelope(len(t), 0.02, 0.7)
     audio *= env
 
-    return normalize(audio)
+    audio = add_reverb(audio, 0.5, 6)
+    return normalize(audio[:int(SAMPLE_RATE * 2.0)])
 
 
 def main():
@@ -296,14 +314,17 @@ def main():
         "game_over": generate_game_over,
     }
 
-    print("Generating Matrix-style cyberpunk sounds...")
+    print("Generating moody Matrix-style sounds...")
+    print("(Dark, atmospheric, low-frequency, ominous)\n")
+
     for name, generator in sounds.items():
         audio = generator()
         filepath = os.path.join(output_dir, f"{name}.wav")
         wavfile.write(filepath, SAMPLE_RATE, audio)
-        print(f"  Generated: {name}.wav")
+        duration_ms = len(audio) / SAMPLE_RATE * 1000
+        print(f"  {name}.wav ({duration_ms:.0f}ms)")
 
-    print("\nDone! All sounds saved to assets/sounds/")
+    print("\nDone! Sounds are darker and more atmospheric now.")
 
 
 if __name__ == "__main__":
