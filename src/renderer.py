@@ -139,12 +139,17 @@ class Renderer:
 
     def _get_asset_dir(self, subdir: str) -> str:
         """Get asset directory path (works for both local and web)."""
-        # Try src/assets first (for pygbag web builds)
-        asset_dir = os.path.join(os.path.dirname(__file__), "assets", subdir)
-        if os.path.exists(asset_dir):
-            return asset_dir
+        base = os.path.dirname(__file__)
+        # Try direct subdir first (for pygbag web builds: src/images, src/sounds)
+        direct = os.path.join(base, subdir)
+        if os.path.exists(direct):
+            return direct
+        # Try assets/subdir (for pygbag if packaged that way)
+        assets_sub = os.path.join(base, "assets", subdir)
+        if os.path.exists(assets_sub):
+            return assets_sub
         # Fallback to ../assets (for local development)
-        return os.path.join(os.path.dirname(__file__), "..", "assets", subdir)
+        return os.path.join(base, "..", "assets", subdir)
 
     def _load_sprites(self) -> dict:
         """Load candy sprite images."""
