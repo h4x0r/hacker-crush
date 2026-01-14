@@ -177,3 +177,75 @@ class Board:
                 merged.append(match.copy())
 
         return merged
+
+    def classify_match(self, match: Set[Tuple[int, int]]) -> dict:
+        """
+        Classify a match to determine what special candy (if any) to create.
+
+        Args:
+            match: Set of (row, col) positions in the match
+
+        Returns:
+            dict with 'type', 'direction' (if striped), 'center' position
+        """
+        if len(match) < 3:
+            return {"type": "none", "count": len(match)}
+
+        positions = list(match)
+        rows = [p[0] for p in positions]
+        cols = [p[1] for p in positions]
+
+        min_row, max_row = min(rows), max(rows)
+        min_col, max_col = min(cols), max(cols)
+
+        row_span = max_row - min_row + 1
+        col_span = max_col - min_col + 1
+
+        count = len(match)
+
+        # Check for 5+ in a line = color bomb
+        if count >= 5:
+            if row_span == 1 or col_span == 1:
+                center = self._find_match_center(match)
+                return {"type": "color_bomb", "count": count, "center": center}
+
+        # Check for L or T shape = wrapped
+        # L/T shape: spans at least 3 in both directions and has 5+ candies
+        if row_span >= 3 and col_span >= 3 and count >= 5:
+            center = self._find_intersection(match)
+            return {"type": "wrapped", "count": count, "center": center}
+
+        # Check for 4 in a line = striped
+        if count >= 4:
+            if row_span == 1:  # Horizontal line
+                center = self._find_match_center(match)
+                return {"type": "striped", "direction": "horizontal", "count": count, "center": center}
+            elif col_span == 1:  # Vertical line
+                center = self._find_match_center(match)
+                return {"type": "striped", "direction": "vertical", "count": count, "center": center}
+
+        # Basic match of 3
+        return {"type": "basic", "count": count}
+
+    def _find_match_center(self, match: Set[Tuple[int, int]]) -> Tuple[int, int]:
+        """Find the center position of a match."""
+        positions = sorted(match)
+        return positions[len(positions) // 2]
+
+    def _find_intersection(self, match: Set[Tuple[int, int]]) -> Tuple[int, int]:
+        """Find the intersection point of an L or T shaped match."""
+        # Count how many times each row and column appears
+        row_counts = {}
+        col_counts = {}
+        for row, col in match:
+            row_counts[row] = row_counts.get(row, 0) + 1
+            col_counts[col] = col_counts.get(col, 0) + 1
+
+        # Find row and column with most candies (intersection)
+        best_row = max(row_counts, key=row_counts.get)
+        best_col = max(col_counts, key=col_counts.get)
+
+        # Return intersection if it exists in match, else center
+        if (best_row, best_col) in match:
+            return (best_row, best_col)
+        return self._find_match_center(match)

@@ -124,3 +124,165 @@ class TestBoardSwap:
         assert board.is_adjacent(0, 0, 1, 0)  # vertical
         assert not board.is_adjacent(0, 0, 0, 2)  # too far
         assert not board.is_adjacent(0, 0, 1, 1)  # diagonal
+
+
+class TestMatchDetection:
+    """Tests for match detection logic."""
+
+    def test_detect_horizontal_match_3(self):
+        """Detects 3 candies in a horizontal row."""
+        board = Board(seed=42)
+        # Manually set up a match
+        board.set_candy(0, 0, Candy("virus", 0, 0))
+        board.set_candy(0, 1, Candy("virus", 0, 1))
+        board.set_candy(0, 2, Candy("virus", 0, 2))
+
+        matches = board.find_matches()
+        assert len(matches) >= 1
+        # Find the match containing our positions
+        found = False
+        for match in matches:
+            if (0, 0) in match and (0, 1) in match and (0, 2) in match:
+                found = True
+                break
+        assert found, "Horizontal match not detected"
+
+    def test_detect_vertical_match_3(self):
+        """Detects 3 candies in a vertical column."""
+        board = Board(seed=42)
+        board.set_candy(0, 0, Candy("lock", 0, 0))
+        board.set_candy(1, 0, Candy("lock", 1, 0))
+        board.set_candy(2, 0, Candy("lock", 2, 0))
+
+        matches = board.find_matches()
+        assert len(matches) >= 1
+        found = False
+        for match in matches:
+            if (0, 0) in match and (1, 0) in match and (2, 0) in match:
+                found = True
+                break
+        assert found, "Vertical match not detected"
+
+    def test_detect_match_4(self):
+        """Detects 4 candies in a row."""
+        board = Board(seed=42)
+        for col in range(4):
+            board.set_candy(3, col, Candy("key", 3, col))
+
+        matches = board.find_matches()
+        found = False
+        for match in matches:
+            if all((3, c) in match for c in range(4)):
+                found = True
+                assert len(match) >= 4
+                break
+        assert found, "Match of 4 not detected"
+
+    def test_detect_match_5(self):
+        """Detects 5 candies in a row."""
+        board = Board(seed=42)
+        for col in range(5):
+            board.set_candy(4, col, Candy("defcon", 4, col))
+
+        matches = board.find_matches()
+        found = False
+        for match in matches:
+            if all((4, c) in match for c in range(5)):
+                found = True
+                assert len(match) >= 5
+                break
+        assert found, "Match of 5 not detected"
+
+    def test_detect_l_shape(self):
+        """Detects L-shaped match (for wrapped candy)."""
+        board = Board(seed=42)
+        # Create L shape:
+        # X X X
+        # X
+        # X
+        board.set_candy(0, 0, Candy("ronin", 0, 0))
+        board.set_candy(0, 1, Candy("ronin", 0, 1))
+        board.set_candy(0, 2, Candy("ronin", 0, 2))
+        board.set_candy(1, 0, Candy("ronin", 1, 0))
+        board.set_candy(2, 0, Candy("ronin", 2, 0))
+
+        matches = board.find_matches()
+        # Should merge into one L-shaped match
+        found = False
+        for match in matches:
+            positions = [(0, 0), (0, 1), (0, 2), (1, 0), (2, 0)]
+            if all(p in match for p in positions):
+                found = True
+                break
+        assert found, "L-shape match not detected"
+
+    def test_detect_t_shape(self):
+        """Detects T-shaped match (for wrapped candy)."""
+        board = Board(seed=42)
+        # Create T shape:
+        # X X X
+        #   X
+        #   X
+        board.set_candy(0, 0, Candy("blackhat", 0, 0))
+        board.set_candy(0, 1, Candy("blackhat", 0, 1))
+        board.set_candy(0, 2, Candy("blackhat", 0, 2))
+        board.set_candy(1, 1, Candy("blackhat", 1, 1))
+        board.set_candy(2, 1, Candy("blackhat", 2, 1))
+
+        matches = board.find_matches()
+        found = False
+        for match in matches:
+            positions = [(0, 0), (0, 1), (0, 2), (1, 1), (2, 1)]
+            if all(p in match for p in positions):
+                found = True
+                break
+        assert found, "T-shape match not detected"
+
+
+class TestMatchClassification:
+    """Tests for classifying match patterns."""
+
+    def test_classify_match_3_horizontal(self):
+        """Match of 3 horizontal is classified as basic."""
+        board = Board(seed=42)
+        match = {(0, 0), (0, 1), (0, 2)}
+        result = board.classify_match(match)
+        assert result["type"] == "basic"
+        assert result["count"] == 3
+
+    def test_classify_match_4_horizontal(self):
+        """Match of 4 horizontal creates striped candy."""
+        board = Board(seed=42)
+        match = {(0, 0), (0, 1), (0, 2), (0, 3)}
+        result = board.classify_match(match)
+        assert result["type"] == "striped"
+        assert result["direction"] == "horizontal"
+
+    def test_classify_match_4_vertical(self):
+        """Match of 4 vertical creates striped candy."""
+        board = Board(seed=42)
+        match = {(0, 0), (1, 0), (2, 0), (3, 0)}
+        result = board.classify_match(match)
+        assert result["type"] == "striped"
+        assert result["direction"] == "vertical"
+
+    def test_classify_match_5(self):
+        """Match of 5 creates color bomb."""
+        board = Board(seed=42)
+        match = {(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)}
+        result = board.classify_match(match)
+        assert result["type"] == "color_bomb"
+
+    def test_classify_l_shape(self):
+        """L-shape creates wrapped candy."""
+        board = Board(seed=42)
+        match = {(0, 0), (0, 1), (0, 2), (1, 0), (2, 0)}
+        result = board.classify_match(match)
+        assert result["type"] == "wrapped"
+
+    def test_classify_t_shape(self):
+        """T-shape creates wrapped candy."""
+        board = Board(seed=42)
+        match = {(0, 0), (0, 1), (0, 2), (1, 1), (2, 1)}
+        result = board.classify_match(match)
+        assert result["type"] == "wrapped"
