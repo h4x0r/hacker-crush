@@ -158,13 +158,27 @@ class GameController:
     def draw_board_animated(self) -> None:
         """Draw board with animated positions."""
         board = self.state.board
+        static_candies = []
+        animated_candies = []
+
+        # Separate static and animated candies
         for row in range(board.rows):
             for col in range(board.cols):
                 candy = board.get_candy(row, col)
                 if candy:
-                    # Get position (animated or default)
                     x, y, scale = self.animations.get_candy_render_pos(candy)
-                    self.renderer.draw_candy(candy, x, y, scale)
+                    if candy in self.animations._candy_positions:
+                        animated_candies.append((candy, x, y, scale))
+                    else:
+                        static_candies.append((candy, x, y, scale))
+
+        # Draw static candies first (behind)
+        for candy, x, y, scale in static_candies:
+            self.renderer.draw_candy(candy, x, y, scale)
+
+        # Draw animated candies on top (in front)
+        for candy, x, y, scale in animated_candies:
+            self.renderer.draw_candy(candy, x, y, scale)
 
 
 async def main():
