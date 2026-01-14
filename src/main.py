@@ -1,8 +1,15 @@
 """Main entry point for Hacker Crush."""
 
 import asyncio
-import webbrowser
+import sys
 import pygame
+
+# webbrowser may not work in web context
+try:
+    import webbrowser
+    HAS_WEBBROWSER = True
+except ImportError:
+    HAS_WEBBROWSER = False
 
 from renderer import Renderer
 from game_state import GameState
@@ -318,7 +325,8 @@ async def main():
                 else:
                     logo_rect = getattr(renderer, 'game_logo_rect', None)
                 if logo_rect and logo_rect.collidepoint(mx, my):
-                    webbrowser.open("https://www.securityronin.com/")
+                    if HAS_WEBBROWSER:
+                        webbrowser.open("https://www.securityronin.com/")
                     continue  # Don't process other clicks
 
                 if menu.state == MenuState.MAIN_MENU:

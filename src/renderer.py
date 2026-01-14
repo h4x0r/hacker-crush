@@ -137,10 +137,19 @@ class Renderer:
                 continue
         return pygame.font.Font(None, size)
 
+    def _get_asset_dir(self, subdir: str) -> str:
+        """Get asset directory path (works for both local and web)."""
+        # Try src/assets first (for pygbag web builds)
+        asset_dir = os.path.join(os.path.dirname(__file__), "assets", subdir)
+        if os.path.exists(asset_dir):
+            return asset_dir
+        # Fallback to ../assets (for local development)
+        return os.path.join(os.path.dirname(__file__), "..", "assets", subdir)
+
     def _load_sprites(self) -> dict:
         """Load candy sprite images."""
         sprites = {}
-        sprite_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "images")
+        sprite_dir = self._get_asset_dir("images")
 
         candy_types = ["blackhat", "defcon", "ronin", "lock", "key", "virus"]
 
@@ -160,7 +169,7 @@ class Renderer:
 
     def _load_logo(self) -> Optional[pygame.Surface]:
         """Load Security Ronin logo for display."""
-        sprite_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "images")
+        sprite_dir = self._get_asset_dir("images")
         path = os.path.join(sprite_dir, "ronin.png")
         try:
             img = pygame.image.load(path).convert_alpha()
@@ -171,11 +180,11 @@ class Renderer:
             return None
 
     def _load_menu_logo(self) -> Optional[pygame.Surface]:
-        """Load Security Ronin logo for main menu from marketing assets."""
-        # Try the official marketing logo first
-        marketing_path = "/Users/4n6h4x0r/Sync/Marketing/Security Ronin/Logo - Security Ronin (against dark background).png"
+        """Load Security Ronin logo for main menu."""
+        sprite_dir = self._get_asset_dir("images")
+        logo_path = os.path.join(sprite_dir, "logo.png")
         try:
-            img = pygame.image.load(marketing_path).convert_alpha()
+            img = pygame.image.load(logo_path).convert_alpha()
             # Scale maintaining aspect ratio (target height ~80px for menu)
             original_width, original_height = img.get_size()
             target_height = 80

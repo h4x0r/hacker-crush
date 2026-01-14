@@ -20,9 +20,18 @@ class AudioManager:
 
         self._load_sounds()
 
+    def _get_asset_dir(self, subdir: str) -> str:
+        """Get asset directory path (works for both local and web)."""
+        # Try src/assets first (for pygbag web builds)
+        asset_dir = os.path.join(os.path.dirname(__file__), "assets", subdir)
+        if os.path.exists(asset_dir):
+            return asset_dir
+        # Fallback to ../assets (for local development)
+        return os.path.join(os.path.dirname(__file__), "..", "assets", subdir)
+
     def _load_sounds(self) -> None:
         """Load all sound effects."""
-        sound_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "sounds")
+        sound_dir = self._get_asset_dir("sounds")
 
         sound_files = {
             "swap": "swap.wav",
@@ -82,7 +91,7 @@ class AudioManager:
         if not self.music_enabled:
             return
 
-        music_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "music")
+        music_dir = self._get_asset_dir("music")
         music_file = os.path.join(music_dir, "background.ogg")
 
         if os.path.exists(music_file):
