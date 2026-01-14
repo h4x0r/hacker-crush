@@ -9,7 +9,8 @@ from constants import (
     WINDOW_WIDTH, WINDOW_HEIGHT, CELL_SIZE, FPS,
     GRID_OFFSET_X, GRID_OFFSET_Y, GRID_ROWS, GRID_COLS,
     COLOR_BG, COLOR_GRID, COLOR_PRIMARY, COLOR_ACCENT, COLOR_WHITE,
-    SPECIAL_STRIPED_H, SPECIAL_STRIPED_V, SPECIAL_WRAPPED, SPECIAL_COLOR_BOMB
+    SPECIAL_STRIPED_H, SPECIAL_STRIPED_V, SPECIAL_WRAPPED, SPECIAL_COLOR_BOMB,
+    MODE_ENDLESS, MODE_MOVES, MODE_TIMED
 )
 from board import Board
 from candy import Candy
@@ -342,6 +343,115 @@ class Renderer:
             Time since last frame in seconds
         """
         return self.clock.tick(FPS) / 1000.0
+
+    def draw_menu(self, options: list, selected_index: int, title: str = "HACKER CRUSH") -> None:
+        """
+        Draw the main menu.
+
+        Args:
+            options: List of menu option dicts with 'name' and 'description'
+            selected_index: Currently selected option index
+            title: Menu title
+        """
+        # Draw title with glitch effect
+        title_text = self.title_font.render(f"> {title}_", True, COLOR_PRIMARY)
+        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 100))
+        self.screen.blit(title_text, title_rect)
+
+        # Draw subtitle
+        subtitle = self.small_font.render("[ SELECT OPERATION MODE ]", True, COLOR_ACCENT)
+        subtitle_rect = subtitle.get_rect(center=(WINDOW_WIDTH // 2, 150))
+        self.screen.blit(subtitle, subtitle_rect)
+
+        # Draw options
+        start_y = 220
+        spacing = 80
+
+        for i, option in enumerate(options):
+            y = start_y + i * spacing
+            is_selected = (i == selected_index)
+
+            # Draw selection indicator
+            if is_selected:
+                # Draw box around selected
+                box_width = 400
+                box_height = 60
+                box_x = (WINDOW_WIDTH - box_width) // 2
+                box_y = y - 10
+                pygame.draw.rect(self.screen, COLOR_PRIMARY,
+                               (box_x, box_y, box_width, box_height), 2)
+
+                # Blinking cursor
+                cursor = ">" if pygame.time.get_ticks() % 500 < 250 else " "
+                prefix = cursor
+            else:
+                prefix = " "
+
+            # Draw option name
+            color = COLOR_PRIMARY if is_selected else COLOR_ACCENT
+            name_text = self.font.render(f"{prefix} {option['name']}", True, color)
+            name_rect = name_text.get_rect(center=(WINDOW_WIDTH // 2, y + 10))
+            self.screen.blit(name_text, name_rect)
+
+            # Draw description
+            desc_color = COLOR_WHITE if is_selected else (100, 100, 100)
+            desc_text = self.small_font.render(option.get('description', ''), True, desc_color)
+            desc_rect = desc_text.get_rect(center=(WINDOW_WIDTH // 2, y + 35))
+            self.screen.blit(desc_text, desc_rect)
+
+        # Draw controls hint
+        controls = self.small_font.render("[UP/DOWN] Navigate  [ENTER] Select", True, (80, 80, 80))
+        controls_rect = controls.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 50))
+        self.screen.blit(controls, controls_rect)
+
+    def draw_game_over_menu(self, score: int, options: list, selected_index: int) -> None:
+        """
+        Draw game over screen with menu options.
+
+        Args:
+            score: Final score
+            options: Menu options
+            selected_index: Currently selected option
+        """
+        # Semi-transparent overlay
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+        overlay.set_alpha(220)
+        overlay.fill(COLOR_BG)
+        self.screen.blit(overlay, (0, 0))
+
+        # Title
+        title_text = self.title_font.render("> BREACH TERMINATED_", True, COLOR_PRIMARY)
+        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 150))
+        self.screen.blit(title_text, title_rect)
+
+        # Score
+        score_text = self.font.render(f"FINAL_SCORE = {score}", True, COLOR_ACCENT)
+        score_rect = score_text.get_rect(center=(WINDOW_WIDTH // 2, 220))
+        self.screen.blit(score_text, score_rect)
+
+        # Options
+        start_y = 320
+        spacing = 70
+
+        for i, option in enumerate(options):
+            y = start_y + i * spacing
+            is_selected = (i == selected_index)
+
+            if is_selected:
+                box_width = 300
+                box_height = 50
+                box_x = (WINDOW_WIDTH - box_width) // 2
+                box_y = y - 5
+                pygame.draw.rect(self.screen, COLOR_PRIMARY,
+                               (box_x, box_y, box_width, box_height), 2)
+                prefix = ">"
+            else:
+                prefix = " "
+
+            color = COLOR_PRIMARY if is_selected else COLOR_ACCENT
+            text = self.font.render(f"{prefix} [{option['name']}]", True, color)
+            rect = text.get_rect(center=(WINDOW_WIDTH // 2, y + 15))
+            self.screen.blit(text, rect)
 
     def quit(self) -> None:
         """Clean up Pygame."""

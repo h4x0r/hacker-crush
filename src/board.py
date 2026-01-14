@@ -4,7 +4,10 @@ import random
 from typing import Optional, List, Tuple, Set
 
 from candy import Candy
-from constants import GRID_ROWS, GRID_COLS, CANDY_TYPES
+from constants import (
+    GRID_ROWS, GRID_COLS, CANDY_TYPES,
+    SPECIAL_STRIPED_H, SPECIAL_STRIPED_V, SPECIAL_WRAPPED, SPECIAL_COLOR_BOMB
+)
 
 
 class Board:
@@ -402,3 +405,158 @@ class Board:
                     if idx < len(candies):
                         self.set_candy(row, col, candies[idx])
                         idx += 1
+
+    def activate_special(self, row: int, col: int, target_type: str = None) -> Set[Tuple[int, int]]:
+        """
+        Activate a special candy at the given position.
+
+        Args:
+            row, col: Position of the special candy
+            target_type: For color bombs, the candy type to clear
+
+        Returns:
+            Set of (row, col) positions that should be cleared
+        """
+        candy = self.get_candy(row, col)
+        if candy is None:
+            return set()
+
+        cleared = set()
+
+        if candy.special == SPECIAL_STRIPED_H:
+            # Clear entire row
+            for c in range(self.cols):
+                cleared.add((row, c))
+
+        elif candy.special == SPECIAL_STRIPED_V:
+            # Clear entire column
+            for r in range(self.rows):
+                cleared.add((r, col))
+
+        elif candy.special == SPECIAL_WRAPPED:
+            # Clear 3x3 area
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    r, c = row + dr, col + dc
+                    if self.is_valid_position(r, c):
+                        cleared.add((r, c))
+
+        elif candy.special == SPECIAL_COLOR_BOMB:
+            # Clear all candies of target type
+            cleared.add((row, col))  # Always include self
+            if target_type:
+                for r in range(self.rows):
+                    for c in range(self.cols):
+                        other = self.get_candy(r, c)
+                        if other and other.candy_type == target_type:
+                            cleared.add((r, c))
+
+        return cleared
+
+    def activate_special_combo(self, r1: int, c1: int, r2: int, c2: int) -> Set[Tuple[int, int]]:
+        """
+        Activate a combination of two special candies.
+
+        Args:
+            r1, c1: Position of first special candy
+            r2, c2: Position of second special candy
+
+        Returns:
+            Set of (row, col) positions that should be cleared
+        """
+        candy1 = self.get_candy(r1, c1)
+        candy2 = self.get_candy(r2, c2)
+
+        if candy1 is None or candy2 is None:
+            return set()
+
+        cleared = set()
+        s1, s2 = candy1.special, candy2.special
+
+        # Sort specials for easier combo detection
+        specials = sorted([s1, s2])
+
+        # Color Bomb + Color Bomb = clear entire board
+        if s1 == SPECIAL_COLOR_BOMB and s2 == SPECIAL_COLOR_BOMB:
+            for r in range(self.rows):
+                for c in range(self.cols):
+                    cleared.add((r, c))
+
+        # Color Bomb + any = all of that color become that special and activate
+        elif SPECIAL_COLOR_BOMB in specials:
+            bomb_pos = (r1, c1) if s1 == SPECIAL_COLOR_BOMB else (r2, c2)
+            other_pos = (r2, c2) if s1 == SPECIAL_COLOR_BOMB else (r1, c1)
+            other_candy = self.get_candy(*other_pos)
+
+            if other_candy:
+                target_type = other_candy.candy_type
+                # Clear all of target color
+                for r in range(self.rows):
+                    for c in range(self.cols):
+                        check = self.get_candy(r, c)
+                        if check and check.candy_type == target_type:
+                            cleared.add((r, c))
+                cleared.add(bomb_pos)
+
+        # Wrapped + Wrapped = 5x5 explosion
+        elif s1 == SPECIAL_WRAPPED and s2 == SPECIAL_WRAPPED:
+            center_r = (r1 + r2) // 2
+            center_c = (c1 + c2) // 2
+            for dr in range(-2, 3):
+                for dc in range(-2, 3):
+                    r, c = center_r + dr, center_c + dc
+                    if self.is_valid_position(r, c):
+                        cleared.add((r, c))
+
+        # Striped + Wrapped = clear 3 rows and 3 columns
+        elif SPECIAL_WRAPPED in specials and (SPECIAL_STRIPED_H in specials or SPECIAL_STRIPED_V in specials):
+            center_r = (r1 + r2) // 2
+            center_c = (c1 + c2) // 2
+            # Clear 3 rows
+            for row in [center_r - 1, center_r, center_r + 1]:
+                if 0 <= row < self.rows:
+                    for c in range(self.cols):
+                        cleared.add((row, c))
+            # Clear 3 columns
+            for col in [center_c - 1, center_c, center_c + 1]:
+                if 0 <= col < self.cols:
+                    for r in range(self.rows):
+                        cleared.add((r, col))
+
+        # Striped + Striped = clear row and column of both
+        elif (s1 in [SPECIAL_STRIPED_H, SPECIAL_STRIPED_V] and
+              s2 in [SPECIAL_STRIPED_H, SPECIAL_STRIPED_V]):
+            # Clear both rows
+            for c in range(self.cols):
+                cleared.add((r1, c))
+                cleared.add((r2, c))
+            # Clear both columns
+            for r in range(self.rows):
+                cleared.add((r, c1))
+                cleared.add((r, c2))
+
+        return cleared
+
+    def process_matches_with_specials(self, matches: List[Set[Tuple[int, int]]]) -> Set[Tuple[int, int]]:
+        """
+        Process matches and trigger any special candies involved.
+
+        Args:
+            matches: List of match sets
+
+        Returns:
+            Set of all positions to clear (including special activations)
+        """
+        all_cleared = set()
+
+        for match in matches:
+            all_cleared.update(match)
+
+            # Check if any special candies are in this match
+            for row, col in match:
+                candy = self.get_candy(row, col)
+                if candy and candy.is_special():
+                    special_cleared = self.activate_special(row, col)
+                    all_cleared.update(special_cleared)
+
+        return all_cleared

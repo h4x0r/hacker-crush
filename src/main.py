@@ -7,6 +7,7 @@ from renderer import Renderer
 from game_state import GameState
 from audio import AudioManager
 from animations import AnimationManager
+from menu import Menu, MenuState
 from constants import MODE_ENDLESS, MODE_MOVES, MODE_TIMED, CELL_SIZE, GRID_OFFSET_X, GRID_OFFSET_Y
 
 
@@ -14,16 +15,13 @@ class GameController:
     """Controls game flow with animations."""
 
     def __init__(self):
-        self.renderer = Renderer()
-        self.audio = AudioManager()
+        self.renderer = None  # Set by main()
+        self.audio = None  # Set by main()
         self.animations = AnimationManager()
-        self.state = GameState(MODE_ENDLESS)
+        self.state = None  # Set by main()
 
         # Pending actions queue (executed after animations complete)
         self.pending_action = None
-
-        # Start background music
-        self.audio.start_music()
 
     def start_swap(self, r1: int, c1: int, r2: int, c2: int) -> None:
         """Start a swap with animation."""
@@ -183,123 +181,169 @@ class GameController:
 
 async def main():
     """Main game loop."""
-    game = GameController()
+    renderer = Renderer()
+    audio = AudioManager()
+    menu = Menu()
+    game = None
 
     # Drag state
     dragging = False
     drag_start_pos = None
     drag_start_cell = None
 
+    # Start background music
+    audio.start_music()
+
     running = True
 
     while running:
-        delta = game.renderer.tick()
-        delta_ms = delta * 1000  # Convert to milliseconds for animations
+        delta = renderer.tick()
+        delta_ms = delta * 1000
 
-        # Update animations
-        game.animations.update(delta_ms)
-
-        # Handle events (blocked during animation)
+        # Handle events based on current state
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    if game.state.is_game_over:
+                # Global keys
+                if event.key == pygame.K_m:
+                    audio.toggle_music()
+                elif event.key == pygame.K_s:
+                    audio.toggle_sfx()
+
+                # Menu navigation
+                elif menu.state == MenuState.MAIN_MENU:
+                    if event.key == pygame.K_UP:
+                        menu.navigate_up()
+                    elif event.key == pygame.K_DOWN:
+                        menu.navigate_down()
+                    elif event.key == pygame.K_RETURN:
+                        mode = menu.confirm()
+                        if menu.state == MenuState.GAME_STARTING:
+                            game = GameController()
+                            game.state = GameState(mode)
+                            game.renderer = renderer
+                            game.audio = audio
+                            dragging = False
+                    elif event.key == pygame.K_ESCAPE:
                         running = False
-                    else:
+
+                # Game over menu
+                elif menu.state == MenuState.GAME_OVER:
+                    if event.key == pygame.K_UP:
+                        menu.navigate_up()
+                    elif event.key == pygame.K_DOWN:
+                        menu.navigate_down()
+                    elif event.key == pygame.K_RETURN:
+                        result = menu.confirm()
+                        if result == "play_again":
+                            game = GameController()
+                            game.state = GameState(menu.last_mode)
+                            game.renderer = renderer
+                            game.audio = audio
+                            dragging = False
+                        elif result == "main_menu":
+                            game = None
+
+                # In-game keys
+                elif menu.state == MenuState.GAME_STARTING and game:
+                    if event.key == pygame.K_ESCAPE:
+                        if game.state.is_game_over:
+                            menu.show_game_over(game.state.score)
+                        else:
+                            # Return to main menu
+                            menu.reset()
+                            game = None
+
+            # Game input (only when playing)
+            elif menu.state == MenuState.GAME_STARTING and game:
+                if not game.animations.is_animating and not game.state.is_game_over:
+                    if event.type == pygame.MOUSEBUTTONDOWN:
+                        pos = renderer.grid_pos_from_mouse(event.pos)
+                        if pos:
+                            dragging = True
+                            drag_start_pos = event.pos
+                            drag_start_cell = pos
+
+                    elif event.type == pygame.MOUSEBUTTONUP and dragging:
+                        if drag_start_cell:
+                            end_pos = renderer.grid_pos_from_mouse(event.pos)
+
+                            if end_pos is None and drag_start_pos:
+                                dx = event.pos[0] - drag_start_pos[0]
+                                dy = event.pos[1] - drag_start_pos[1]
+                                r1, c1 = drag_start_cell
+
+                                if abs(dx) > abs(dy):
+                                    if dx > CELL_SIZE // 3:
+                                        end_pos = (r1, c1 + 1)
+                                    elif dx < -CELL_SIZE // 3:
+                                        end_pos = (r1, c1 - 1)
+                                else:
+                                    if dy > CELL_SIZE // 3:
+                                        end_pos = (r1 + 1, c1)
+                                    elif dy < -CELL_SIZE // 3:
+                                        end_pos = (r1 - 1, c1)
+
+                            if end_pos and end_pos != drag_start_cell:
+                                r1, c1 = drag_start_cell
+                                r2, c2 = end_pos
+                                if game.state.board.is_adjacent(r1, c1, r2, c2):
+                                    game.start_swap(r1, c1, r2, c2)
+
                         dragging = False
                         drag_start_pos = None
                         drag_start_cell = None
-                elif event.key == pygame.K_r and game.state.is_game_over:
-                    # Restart game
-                    game.state = GameState(MODE_ENDLESS)
-                    game.animations.clear_all()
-                    dragging = False
-                    drag_start_pos = None
-                    drag_start_cell = None
-                elif event.key == pygame.K_m:
-                    game.audio.toggle_music()
-                elif event.key == pygame.K_s:
-                    game.audio.toggle_sfx()
 
-            # Only allow input when not animating
-            elif not game.animations.is_animating and not game.state.is_game_over:
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    pos = game.renderer.grid_pos_from_mouse(event.pos)
-                    if pos:
-                        dragging = True
-                        drag_start_pos = event.pos
-                        drag_start_cell = pos
+        # Update game state
+        if menu.state == MenuState.GAME_STARTING and game:
+            game.animations.update(delta_ms)
 
-                elif event.type == pygame.MOUSEBUTTONUP and dragging:
-                    if drag_start_cell:
-                        end_pos = game.renderer.grid_pos_from_mouse(event.pos)
+            # Update time for timed mode
+            if game.state.mode == MODE_TIMED and not game.state.is_game_over:
+                game.state.update_time(delta)
+                if game.state.is_game_over:
+                    audio.play("game_over")
+                    menu.show_game_over(game.state.score)
 
-                        # Calculate drag direction based on movement
-                        if end_pos is None and drag_start_pos:
-                            dx = event.pos[0] - drag_start_pos[0]
-                            dy = event.pos[1] - drag_start_pos[1]
-
-                            r1, c1 = drag_start_cell
-
-                            if abs(dx) > abs(dy):
-                                if dx > CELL_SIZE // 3:
-                                    end_pos = (r1, c1 + 1)
-                                elif dx < -CELL_SIZE // 3:
-                                    end_pos = (r1, c1 - 1)
-                            else:
-                                if dy > CELL_SIZE // 3:
-                                    end_pos = (r1 + 1, c1)
-                                elif dy < -CELL_SIZE // 3:
-                                    end_pos = (r1 - 1, c1)
-
-                        if end_pos and end_pos != drag_start_cell:
-                            r1, c1 = drag_start_cell
-                            r2, c2 = end_pos
-
-                            if game.state.board.is_adjacent(r1, c1, r2, c2):
-                                game.start_swap(r1, c1, r2, c2)
-
-                    dragging = False
-                    drag_start_pos = None
-                    drag_start_cell = None
-
-        # Update time for timed mode
-        if game.state.mode == MODE_TIMED and not game.state.is_game_over:
-            game.state.update_time(delta)
-            if game.state.is_game_over:
-                game.audio.play("game_over")
+            # Check for game over transition
+            if game.state.is_game_over and menu.state != MenuState.GAME_OVER:
+                menu.show_game_over(game.state.score)
 
         # Render
-        game.renderer.clear()
-        game.renderer.draw_grid()
-        game.draw_board_animated()
-        game.renderer.draw_score(game.state.score)
+        renderer.clear()
 
-        # Mode-specific UI
-        if hasattr(game.state, 'moves_remaining'):
-            game.renderer.draw_moves(game.state.moves_remaining)
-        elif hasattr(game.state, 'time_remaining'):
-            game.renderer.draw_time(game.state.time_remaining)
+        if menu.state == MenuState.MAIN_MENU:
+            renderer.draw_menu(menu.get_options(), menu.selected_index)
 
-        # Draw drag indicator (only when not animating)
-        if dragging and drag_start_cell and drag_start_pos and not game.animations.is_animating:
-            game.renderer.draw_selection(drag_start_cell[0], drag_start_cell[1])
-            current_pos = pygame.mouse.get_pos()
-            game.renderer.draw_drag_line(drag_start_pos, current_pos)
+        elif menu.state == MenuState.GAME_STARTING and game:
+            renderer.draw_grid()
+            game.draw_board_animated()
+            renderer.draw_score(game.state.score)
 
-        if game.state.is_game_over:
-            game.renderer.draw_game_over(game.state.score)
+            if hasattr(game.state, 'moves_remaining'):
+                renderer.draw_moves(game.state.moves_remaining)
+            elif hasattr(game.state, 'time_remaining'):
+                renderer.draw_time(game.state.time_remaining)
 
-        game.renderer.update()
+            if dragging and drag_start_cell and drag_start_pos and not game.animations.is_animating:
+                renderer.draw_selection(drag_start_cell[0], drag_start_cell[1])
+                current_pos = pygame.mouse.get_pos()
+                renderer.draw_drag_line(drag_start_pos, current_pos)
 
-        # Yield for Pygbag async
+        elif menu.state == MenuState.GAME_OVER:
+            # Draw game in background
+            if game:
+                renderer.draw_grid()
+                game.draw_board_animated()
+            renderer.draw_game_over_menu(menu.final_score, menu.get_options(), menu.selected_index)
+
+        renderer.update()
         await asyncio.sleep(0)
 
-    game.audio.cleanup()
-    game.renderer.quit()
+    audio.cleanup()
+    renderer.quit()
 
 
 if __name__ == "__main__":

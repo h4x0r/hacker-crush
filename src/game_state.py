@@ -1,9 +1,10 @@
 """Game state management."""
 
 from board import Board
+from typing import Dict
 from constants import (
     MODE_ENDLESS, MODE_MOVES, MODE_TIMED,
-    MOVES_INITIAL, MOVES_TARGET_BASE,
+    MOVES_INITIAL, MOVES_TARGET_BASE, MOVES_TARGET_MULTIPLIER, MOVES_BONUS_PER_UNUSED,
     TIMED_INITIAL_SECONDS, TIMED_BONUS_SPECIAL, TIMED_BONUS_COMBO,
     SCORE_BASE, CASCADE_MULTIPLIER,
     SCORE_STRIPED_BONUS, SCORE_WRAPPED_BONUS, SCORE_COLOR_BOMB_BONUS,
@@ -141,3 +142,64 @@ class GameState:
         # Timed mode is handled in update_time
 
         return self.is_game_over
+
+    # Level progression methods (Moves mode)
+    def check_level_complete(self) -> bool:
+        """
+        Check if current level is complete and handle level up.
+
+        Returns:
+            True if level was completed
+        """
+        if self.mode != MODE_MOVES:
+            return False
+
+        if self.score >= self.target_score:
+            # Add bonus for unused moves
+            if hasattr(self, 'moves_remaining'):
+                bonus = self.moves_remaining * MOVES_BONUS_PER_UNUSED
+                self.score += bonus
+
+            # Level up
+            self.level += 1
+            self.target_score = int(MOVES_TARGET_BASE * (MOVES_TARGET_MULTIPLIER ** (self.level - 1)))
+            self.moves_remaining = MOVES_INITIAL
+            self.board = Board(seed=None)  # New board for new level
+            return True
+
+        return False
+
+    def calculate_stars(self) -> int:
+        """
+        Calculate stars earned for current score.
+
+        Returns:
+            Number of stars (0-3)
+        """
+        if self.mode != MODE_MOVES:
+            return 0
+
+        if self.score >= self.target_score * 2:
+            return 3
+        elif self.score >= self.target_score * 1.5:
+            return 2
+        elif self.score >= self.target_score:
+            return 1
+        return 0
+
+    def get_level_info(self) -> dict:
+        """
+        Get level information for display.
+
+        Returns:
+            Dict with level, target, and progress percentage
+        """
+        if self.mode != MODE_MOVES:
+            return {"level": 1, "target": 0, "progress": 0}
+
+        progress = min(100, int((self.score / self.target_score) * 100))
+        return {
+            "level": self.level,
+            "target": self.target_score,
+            "progress": progress
+        }
