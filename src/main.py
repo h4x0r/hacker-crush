@@ -1,6 +1,7 @@
 """Main entry point for Hacker Crush."""
 
 import asyncio
+import webbrowser
 import pygame
 
 from renderer import Renderer
@@ -310,6 +311,12 @@ async def main():
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mx, my = event.pos
 
+                # Check logo click (opens Security Ronin website)
+                logo_rect = getattr(renderer, 'menu_logo_rect', None) or getattr(renderer, 'game_logo_rect', None)
+                if logo_rect and logo_rect.collidepoint(mx, my):
+                    webbrowser.open("https://www.securityronin.com/")
+                    continue  # Don't process other clicks
+
                 if menu.state == MenuState.MAIN_MENU:
                     # Menu item positions: start_y=220, spacing=80, box_height=60
                     start_y = 220
@@ -432,6 +439,9 @@ async def main():
                 renderer.draw_selection(drag_start_cell[0], drag_start_cell[1])
                 current_pos = pygame.mouse.get_pos()
                 renderer.draw_drag_line(drag_start_pos, current_pos)
+
+            # Draw logo and game name
+            renderer.draw_hud_logo()
 
         elif menu.state == MenuState.GAME_OVER:
             # Draw game in background

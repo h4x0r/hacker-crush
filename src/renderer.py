@@ -18,16 +18,24 @@ from particles import Particle, ParticleSystem, ParticleType
 
 
 class MatrixRain:
-    """Falling matrix-style characters effect."""
+    """Falling matrix-style characters effect like The Matrix."""
 
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
-        self.chars = "01アイウエオカキクケコサシスセソタチツテト"
-        self.font_size = 14
+        self.chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン"
+        self.font_size = 16
         self.columns = width // self.font_size
-        self.drops = [random.randint(-20, 0) for _ in range(self.columns)]
-        self.font = None  # Set after pygame init
+        # Each column has: drop position, speed, trail length
+        self.drops = []
+        for _ in range(self.columns):
+            self.drops.append({
+                'y': random.randint(-30, 0),
+                'speed': random.uniform(0.3, 1.0),
+                'trail': random.randint(8, 20),
+                'chars': [random.choice(self.chars) for _ in range(25)]
+            })
+        self.font = None
 
     def init_font(self):
         """Initialize font after pygame is ready."""
@@ -35,25 +43,43 @@ class MatrixRain:
 
     def update(self) -> None:
         """Update rain positions."""
-        for i in range(len(self.drops)):
-            self.drops[i] += 1
-            if self.drops[i] * self.font_size > self.height and random.random() > 0.975:
-                self.drops[i] = 0
+        for drop in self.drops:
+            drop['y'] += drop['speed']
+            # Reset when off screen
+            if drop['y'] * self.font_size > self.height + drop['trail'] * self.font_size:
+                drop['y'] = random.randint(-20, -5)
+                drop['speed'] = random.uniform(0.3, 1.0)
+                drop['trail'] = random.randint(8, 20)
+            # Randomly change characters for glitch effect
+            if random.random() < 0.1:
+                idx = random.randint(0, len(drop['chars']) - 1)
+                drop['chars'][idx] = random.choice(self.chars)
 
     def draw(self, surface: pygame.Surface) -> None:
-        """Draw matrix rain effect."""
+        """Draw matrix rain effect with trailing characters."""
         if not self.font:
             self.init_font()
 
         for i, drop in enumerate(self.drops):
-            char = random.choice(self.chars)
-            # Dim green for background effect
-            color = (0, random.randint(40, 80), 0)
-            text = self.font.render(char, True, color)
             x = i * self.font_size
-            y = drop * self.font_size
-            if 0 <= y < self.height:
-                surface.blit(text, (x, y))
+            head_y = int(drop['y'] * self.font_size)
+
+            # Draw trail (fading characters behind the head)
+            for j in range(drop['trail']):
+                char_y = head_y - j * self.font_size
+                if 0 <= char_y < self.height:
+                    # Brightness fades with distance from head
+                    if j == 0:
+                        # Head character is brightest (white-green)
+                        color = (180, 255, 180)
+                    else:
+                        # Trail fades from bright to dim green
+                        brightness = max(30, 180 - j * 12)
+                        color = (0, brightness, 0)
+
+                    char = drop['chars'][j % len(drop['chars'])]
+                    text = self.font.render(char, True, color)
+                    surface.blit(text, (x, char_y))
 
 
 class Renderer:
@@ -74,6 +100,9 @@ class Renderer:
 
         # Load candy sprites
         self.sprites = self._load_sprites()
+
+        # Load logo sprite (larger ronin)
+        self.logo = self._load_logo()
 
         # Fallback colors if sprites fail to load
         self.candy_colors = {
@@ -127,6 +156,18 @@ class Renderer:
                 sprites[candy_type] = None
 
         return sprites
+
+    def _load_logo(self) -> Optional[pygame.Surface]:
+        """Load Security Ronin logo for display."""
+        sprite_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "images")
+        path = os.path.join(sprite_dir, "ronin.png")
+        try:
+            img = pygame.image.load(path).convert_alpha()
+            # Scale to logo size (64x64 for HUD, will scale for menu)
+            img = pygame.transform.smoothscale(img, (64, 64))
+            return img
+        except Exception:
+            return None
 
     def _create_scanlines(self) -> pygame.Surface:
         """Create CRT scanline overlay effect."""
@@ -269,6 +310,23 @@ class Renderer:
         text_rect = text.get_rect(right=WINDOW_WIDTH - 20, top=20)
         self.screen.blit(text, text_rect)
 
+    def draw_hud_logo(self) -> None:
+        """Draw logo and game name in game HUD (clickable)."""
+        # Draw small logo in top-left corner next to score
+        if self.logo:
+            logo_size = 40
+            logo_x = WINDOW_WIDTH - logo_size - 20
+            logo_y = WINDOW_HEIGHT - logo_size - 20
+            self.screen.blit(pygame.transform.smoothscale(self.logo, (logo_size, logo_size)),
+                           (logo_x, logo_y))
+            self.game_logo_rect = pygame.Rect(logo_x, logo_y, logo_size, logo_size)
+
+            # Draw "HACKER CRUSH" text next to logo
+            name_text = self.small_font.render("HACKER CRUSH", True, (0, 100, 0))
+            self.screen.blit(name_text, (logo_x - 150, logo_y + 10))
+        else:
+            self.game_logo_rect = None
+
     def draw_selection(self, row: int, col: int) -> None:
         """Draw selection highlight around a cell."""
         x = GRID_OFFSET_X + col * CELL_SIZE
@@ -396,14 +454,26 @@ class Renderer:
             selected_index: Currently selected option index
             title: Menu title
         """
+        # Draw Security Ronin logo (clickable)
+        if self.logo:
+            logo_size = 80
+            logo_scaled = pygame.transform.smoothscale(self.logo, (logo_size, logo_size))
+            logo_x = WINDOW_WIDTH // 2 - logo_size // 2
+            logo_y = 20
+            self.screen.blit(logo_scaled, (logo_x, logo_y))
+            # Store logo rect for click detection
+            self.menu_logo_rect = pygame.Rect(logo_x, logo_y, logo_size, logo_size)
+        else:
+            self.menu_logo_rect = None
+
         # Draw title with glitch effect
         title_text = self.title_font.render(f"> {title}_", True, COLOR_PRIMARY)
-        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 100))
+        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 130))
         self.screen.blit(title_text, title_rect)
 
         # Draw subtitle
         subtitle = self.small_font.render("[ SELECT OPERATION MODE ]", True, COLOR_ACCENT)
-        subtitle_rect = subtitle.get_rect(center=(WINDOW_WIDTH // 2, 150))
+        subtitle_rect = subtitle.get_rect(center=(WINDOW_WIDTH // 2, 175))
         self.screen.blit(subtitle, subtitle_rect)
 
         # Draw options
