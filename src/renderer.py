@@ -329,26 +329,24 @@ class Renderer:
         self.screen.blit(text, text_rect)
 
     def draw_hud_logo(self) -> None:
-        """Draw marketing logo as subtle watermark inside the game board."""
+        """Draw marketing logo prominently below the game board."""
         logo_to_use = self.menu_logo or self.logo
         if logo_to_use:
-            # Scale logo to fit nicely in bottom of grid area
+            # Scale logo to fit below the grid
             logo_rect = logo_to_use.get_rect()
-            # Scale to ~60% of grid width while maintaining aspect ratio
-            target_width = int(GRID_COLS * CELL_SIZE * 0.5)
-            scale = target_width / logo_rect.width
-            target_height = int(logo_rect.height * scale)
+            # Scale to fit in the space below grid (grid ends at y=592, window is 600)
+            # Use a reasonable size that's prominent
+            target_height = 50
+            scale = target_height / logo_rect.height
+            target_width = int(logo_rect.width * scale)
 
             scaled_logo = pygame.transform.smoothscale(logo_to_use, (target_width, target_height))
 
-            # Position at bottom center of grid
-            grid_center_x = GRID_OFFSET_X + (GRID_COLS * CELL_SIZE) // 2
-            grid_bottom = GRID_OFFSET_Y + GRID_ROWS * CELL_SIZE
-            logo_x = grid_center_x - target_width // 2
-            logo_y = grid_bottom - target_height - 10  # 10px from bottom
+            # Position centered, in the HUD area at top (between score and time)
+            logo_x = WINDOW_WIDTH // 2 - target_width // 2
+            logo_y = 15  # Top area, prominent
 
-            # Make semi-transparent watermark
-            scaled_logo.set_alpha(60)
+            # Full opacity - prominent, not translucent
             self.screen.blit(scaled_logo, (logo_x, logo_y))
 
             self.game_logo_rect = pygame.Rect(logo_x, logo_y, target_width, target_height)
@@ -482,14 +480,14 @@ class Renderer:
             selected_index: Currently selected option index
             title: Menu title
         """
-        # Draw Security Ronin logo (clickable)
+        # Draw Security Ronin logo (clickable) with top margin
         logo_to_use = self.menu_logo or self.logo
-        logo_bottom = 10  # Default if no logo
+        logo_bottom = 50  # Default if no logo
         if logo_to_use:
             # Get actual logo dimensions and center it
             logo_rect = logo_to_use.get_rect()
             logo_x = WINDOW_WIDTH // 2 - logo_rect.width // 2
-            logo_y = 10
+            logo_y = 40  # Top margin
             self.screen.blit(logo_to_use, (logo_x, logo_y))
             # Store logo rect for click detection
             self.menu_logo_rect = pygame.Rect(logo_x, logo_y, logo_rect.width, logo_rect.height)
