@@ -265,7 +265,9 @@ class Renderer:
         mins = int(seconds) // 60
         secs = int(seconds) % 60
         text = self.font.render(f"TIME: {mins}:{secs:02d}", True, COLOR_PRIMARY)
-        self.screen.blit(text, (WINDOW_WIDTH - 180, 20))
+        # Right-align with padding from edge
+        text_rect = text.get_rect(right=WINDOW_WIDTH - 20, top=20)
+        self.screen.blit(text, text_rect)
 
     def draw_selection(self, row: int, col: int) -> None:
         """Draw selection highlight around a cell."""

@@ -43,9 +43,17 @@ class GameController:
                 on_complete=lambda: self._complete_swap(r1, c1, r2, c2)
             )
         else:
-            # Invalid swap - play sound and shake animation
-            self.audio.play("invalid")
-            self.animations.add_invalid_swap(candy1, candy2)
+            # Invalid swap - animate swap forward, then swap back (penalty)
+            self.animations.add_swap(
+                candy1, candy2,
+                on_complete=lambda: self._invalid_swap_back(candy1, candy2, r1, c1, r2, c2)
+            )
+
+    def _invalid_swap_back(self, candy1, candy2, r1: int, c1: int, r2: int, c2: int) -> None:
+        """Play error sound and animate swap back for invalid move."""
+        self.audio.play("invalid")
+        # Swap back - candies are now visually at opposite positions
+        self.animations.add_swap(candy1, candy2)
 
     def _complete_swap(self, r1: int, c1: int, r2: int, c2: int) -> None:
         """Complete the swap after animation and process matches."""
@@ -276,45 +284,116 @@ async def main():
                             menu.reset()
                             game = None
 
-            # Game input (only when playing)
-            elif menu.state == MenuState.GAME_STARTING and game:
-                if not game.animations.is_animating and not game.state.is_game_over:
-                    if event.type == pygame.MOUSEBUTTONDOWN:
+            # Mouse movement for menu hover
+            elif event.type == pygame.MOUSEMOTION:
+                mx, my = event.pos
+
+                if menu.state == MenuState.MAIN_MENU:
+                    start_y, spacing, box_height, box_width = 220, 80, 60, 400
+                    box_x = (800 - box_width) // 2
+                    for i in range(len(menu.get_options())):
+                        item_y = start_y + i * spacing - 10
+                        if box_x <= mx <= box_x + box_width and item_y <= my <= item_y + box_height:
+                            menu.selected_index = i
+                            break
+
+                elif menu.state == MenuState.GAME_OVER:
+                    start_y, spacing, box_height, box_width = 320, 70, 50, 300
+                    box_x = (800 - box_width) // 2
+                    for i in range(len(menu.get_options())):
+                        item_y = start_y + i * spacing - 5
+                        if box_x <= mx <= box_x + box_width and item_y <= my <= item_y + box_height:
+                            menu.selected_index = i
+                            break
+
+            # Mouse click handling
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+
+                if menu.state == MenuState.MAIN_MENU:
+                    # Menu item positions: start_y=220, spacing=80, box_height=60
+                    start_y = 220
+                    spacing = 80
+                    box_height = 60
+                    box_width = 400
+                    box_x = (800 - box_width) // 2  # WINDOW_WIDTH
+
+                    for i in range(len(menu.get_options())):
+                        item_y = start_y + i * spacing - 10
+                        if box_x <= mx <= box_x + box_width and item_y <= my <= item_y + box_height:
+                            menu.selected_index = i
+                            mode = menu.confirm()
+                            if menu.state == MenuState.GAME_STARTING:
+                                game = GameController()
+                                game.state = GameState(mode)
+                                game.renderer = renderer
+                                game.audio = audio
+                                dragging = False
+                            break
+
+                elif menu.state == MenuState.GAME_OVER:
+                    # Game over menu: start_y=320, spacing=70, box_height=50
+                    start_y = 320
+                    spacing = 70
+                    box_height = 50
+                    box_width = 300
+                    box_x = (800 - box_width) // 2
+
+                    for i in range(len(menu.get_options())):
+                        item_y = start_y + i * spacing - 5
+                        if box_x <= mx <= box_x + box_width and item_y <= my <= item_y + box_height:
+                            menu.selected_index = i
+                            result = menu.confirm()
+                            if result == "play_again":
+                                game = GameController()
+                                game.state = GameState(menu.last_mode)
+                                game.renderer = renderer
+                                game.audio = audio
+                                dragging = False
+                            elif result == "main_menu":
+                                game = None
+                            break
+
+                elif menu.state == MenuState.GAME_STARTING and game:
+                    # Game input - start drag
+                    if not game.animations.is_animating and not game.state.is_game_over:
                         pos = renderer.grid_pos_from_mouse(event.pos)
                         if pos:
                             dragging = True
                             drag_start_pos = event.pos
                             drag_start_cell = pos
 
-                    elif event.type == pygame.MOUSEBUTTONUP and dragging:
-                        if drag_start_cell:
-                            end_pos = renderer.grid_pos_from_mouse(event.pos)
+            # Mouse release - complete swap
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                if menu.state == MenuState.GAME_STARTING and game and dragging:
+                    if drag_start_cell:
+                        end_pos = renderer.grid_pos_from_mouse(event.pos)
 
-                            if end_pos is None and drag_start_pos:
-                                dx = event.pos[0] - drag_start_pos[0]
-                                dy = event.pos[1] - drag_start_pos[1]
-                                r1, c1 = drag_start_cell
+                        if end_pos is None and drag_start_pos:
+                            dx = event.pos[0] - drag_start_pos[0]
+                            dy = event.pos[1] - drag_start_pos[1]
+                            r1, c1 = drag_start_cell
 
-                                if abs(dx) > abs(dy):
-                                    if dx > CELL_SIZE // 3:
-                                        end_pos = (r1, c1 + 1)
-                                    elif dx < -CELL_SIZE // 3:
-                                        end_pos = (r1, c1 - 1)
-                                else:
-                                    if dy > CELL_SIZE // 3:
-                                        end_pos = (r1 + 1, c1)
-                                    elif dy < -CELL_SIZE // 3:
-                                        end_pos = (r1 - 1, c1)
+                            if abs(dx) > abs(dy):
+                                if dx > CELL_SIZE // 3:
+                                    end_pos = (r1, c1 + 1)
+                                elif dx < -CELL_SIZE // 3:
+                                    end_pos = (r1, c1 - 1)
+                            else:
+                                if dy > CELL_SIZE // 3:
+                                    end_pos = (r1 + 1, c1)
+                                elif dy < -CELL_SIZE // 3:
+                                    end_pos = (r1 - 1, c1)
 
-                            if end_pos and end_pos != drag_start_cell:
-                                r1, c1 = drag_start_cell
-                                r2, c2 = end_pos
-                                if game.state.board.is_adjacent(r1, c1, r2, c2):
-                                    game.start_swap(r1, c1, r2, c2)
+                        if end_pos and end_pos != drag_start_cell:
+                            r1, c1 = drag_start_cell
+                            r2, c2 = end_pos
+                            if game.state.board.is_adjacent(r1, c1, r2, c2):
+                                game.start_swap(r1, c1, r2, c2)
 
-                        dragging = False
-                        drag_start_pos = None
-                        drag_start_cell = None
+                    dragging = False
+                    drag_start_pos = None
+                    drag_start_cell = None
 
         # Update game state
         if menu.state == MenuState.GAME_STARTING and game:
