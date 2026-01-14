@@ -312,7 +312,11 @@ async def main():
                 mx, my = event.pos
 
                 # Check logo click (opens Security Ronin website)
-                logo_rect = getattr(renderer, 'menu_logo_rect', None) or getattr(renderer, 'game_logo_rect', None)
+                # Use the appropriate rect based on current state
+                if menu.state == MenuState.MAIN_MENU:
+                    logo_rect = getattr(renderer, 'menu_logo_rect', None)
+                else:
+                    logo_rect = getattr(renderer, 'game_logo_rect', None)
                 if logo_rect and logo_rect.collidepoint(mx, my):
                     webbrowser.open("https://www.securityronin.com/")
                     continue  # Don't process other clicks
