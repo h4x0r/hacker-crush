@@ -8,6 +8,7 @@ from game_state import GameState
 from audio import AudioManager
 from animations import AnimationManager
 from menu import Menu, MenuState
+from particles import ParticleSystem
 from constants import MODE_ENDLESS, MODE_MOVES, MODE_TIMED, CELL_SIZE, GRID_OFFSET_X, GRID_OFFSET_Y
 
 
@@ -18,6 +19,7 @@ class GameController:
         self.renderer = None  # Set by main()
         self.audio = None  # Set by main()
         self.animations = AnimationManager()
+        self.particles = ParticleSystem()
         self.state = None  # Set by main()
 
         # Pending actions queue (executed after animations complete)
@@ -70,11 +72,29 @@ class GameController:
             self.state.add_match_score(len(match), cascade_level)
             self.audio.play_match(len(match))
 
+            # Emit particles for each candy in match
+            for (row, col) in match:
+                px = GRID_OFFSET_X + col * CELL_SIZE + CELL_SIZE // 2
+                py = GRID_OFFSET_Y + row * CELL_SIZE + CELL_SIZE // 2
+                self.particles.emit_match_effect(px, py)
+
             # Check for special candy creation
             classification = self.state.board.classify_match(match)
             if classification["type"] != "basic":
                 self.state.add_special_bonus(classification["type"])
                 self.audio.play_special(classification["type"])
+                # Extra particles for special candy creation
+                center_row, center_col = classification.get("center", list(match)[0])
+                px = GRID_OFFSET_X + center_col * CELL_SIZE + CELL_SIZE // 2
+                py = GRID_OFFSET_Y + center_row * CELL_SIZE + CELL_SIZE // 2
+                self.particles.emit_special_effect(px, py)
+
+        # Combo particles for cascades
+        if cascade_level > 1:
+            # Emit combo effect at center of grid
+            cx = GRID_OFFSET_X + (self.state.board.cols // 2) * CELL_SIZE
+            cy = GRID_OFFSET_Y + (self.state.board.rows // 2) * CELL_SIZE
+            self.particles.emit_combo_effect(cx, cy, combo_level=cascade_level)
 
         # Get candies to animate clearing
         candies_to_clear = []
@@ -299,6 +319,7 @@ async def main():
         # Update game state
         if menu.state == MenuState.GAME_STARTING and game:
             game.animations.update(delta_ms)
+            game.particles.update(delta)  # Update particles
 
             # Update time for timed mode
             if game.state.mode == MODE_TIMED and not game.state.is_game_over:
@@ -320,6 +341,7 @@ async def main():
         elif menu.state == MenuState.GAME_STARTING and game:
             renderer.draw_grid()
             game.draw_board_animated()
+            renderer.draw_particles(game.particles)  # Draw particles on top
             renderer.draw_score(game.state.score)
 
             if hasattr(game.state, 'moves_remaining'):

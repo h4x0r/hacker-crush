@@ -14,6 +14,7 @@ from constants import (
 )
 from board import Board
 from candy import Candy
+from particles import Particle, ParticleSystem, ParticleType
 
 
 class MatrixRain:
@@ -278,6 +279,46 @@ class Renderer:
     def draw_drag_line(self, start_pos: Tuple[int, int], end_pos: Tuple[int, int]) -> None:
         """Draw line showing drag direction."""
         pygame.draw.line(self.screen, COLOR_ACCENT, start_pos, end_pos, 2)
+
+    def draw_particles(self, particle_system: ParticleSystem) -> None:
+        """
+        Draw all particles in the system.
+
+        Args:
+            particle_system: The particle system to render
+        """
+        for particle in particle_system.particles:
+            # Calculate alpha-adjusted color
+            r, g, b = particle.color
+            alpha = int(particle.alpha * 255)
+
+            if particle.particle_type == ParticleType.BINARY:
+                # Draw binary digit as text
+                if not hasattr(self, '_particle_font'):
+                    self._particle_font = self._load_font(16)
+
+                # Create surface with alpha
+                text_surface = self._particle_font.render(particle.char, True, (r, g, b))
+                text_surface.set_alpha(alpha)
+                self.screen.blit(text_surface, (int(particle.x), int(particle.y)))
+            else:
+                # Draw as glowing circle
+                size = particle.size
+
+                # Outer glow (larger, more transparent)
+                glow_surface = pygame.Surface((size * 4, size * 4), pygame.SRCALPHA)
+                glow_alpha = int(alpha * 0.3)
+                pygame.draw.circle(glow_surface, (r, g, b, glow_alpha),
+                                 (size * 2, size * 2), size * 2)
+                self.screen.blit(glow_surface,
+                               (int(particle.x - size * 2), int(particle.y - size * 2)))
+
+                # Inner bright core
+                core_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+                pygame.draw.circle(core_surface, (r, g, b, alpha),
+                                 (size, size), size)
+                self.screen.blit(core_surface,
+                               (int(particle.x - size), int(particle.y - size)))
 
     def draw_game_over(self, score: int) -> None:
         """Draw game over screen with hacker style."""
