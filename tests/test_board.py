@@ -387,3 +387,105 @@ class TestGravity:
         assert board.get_candy(0, 0) is None
         assert board.get_candy(0, 1) is None
         assert board.get_candy(0, 2) is None
+
+
+class TestValidMoves:
+    """Tests for detecting valid moves."""
+
+    def test_has_valid_moves_initially(self):
+        """Fresh board should have valid moves."""
+        board = Board(seed=42)
+        assert board.has_valid_moves()
+
+    def test_find_valid_moves_returns_moves(self):
+        """find_valid_moves returns list of possible swaps."""
+        board = Board(seed=42)
+        moves = board.find_valid_moves()
+        assert len(moves) > 0
+        # Each move should be ((r1,c1), (r2,c2))
+        for move in moves:
+            assert len(move) == 2
+            assert len(move[0]) == 2
+            assert len(move[1]) == 2
+
+    def test_valid_move_creates_match(self):
+        """Each valid move should create a match when executed."""
+        board = Board(seed=42)
+        moves = board.find_valid_moves()
+
+        if moves:
+            # Test first move
+            (r1, c1), (r2, c2) = moves[0]
+            board.swap(r1, c1, r2, c2)
+            matches = board.find_matches()
+            assert len(matches) > 0, "Valid move didn't create a match"
+
+    def test_would_create_match_returns_true_for_valid_swap(self):
+        """would_create_match returns True when swap creates a match."""
+        board = Board(seed=42)
+        # Set up: V X V V - swapping position 0,1 with 1,1 could create match
+        board.set_candy(0, 0, Candy("virus", 0, 0))
+        board.set_candy(0, 1, Candy("lock", 0, 1))
+        board.set_candy(0, 2, Candy("virus", 0, 2))
+        board.set_candy(0, 3, Candy("virus", 0, 3))
+
+        # Swapping (0,1) and (0,2) would create V V X V - not a match
+        # But we need: X V V V and swap first two
+        board.set_candy(0, 0, Candy("lock", 0, 0))
+        board.set_candy(0, 1, Candy("virus", 0, 1))
+        board.set_candy(0, 2, Candy("virus", 0, 2))
+        board.set_candy(0, 3, Candy("virus", 0, 3))
+
+        # Swapping (0,0) and (0,1): L V V V -> V L V V - not match
+        # Need: V V L V V and swap middle with either side
+        board.set_candy(0, 0, Candy("virus", 0, 0))
+        board.set_candy(0, 1, Candy("virus", 0, 1))
+        board.set_candy(0, 2, Candy("lock", 0, 2))
+        board.set_candy(0, 3, Candy("virus", 0, 3))
+        board.set_candy(0, 4, Candy("virus", 0, 4))
+
+        # After swap (0,2) with (0,3): V V V L V - creates match!
+        result = board.would_create_match(0, 2, 0, 3)
+        assert result is True
+
+    def test_would_create_match_returns_false_for_invalid_swap(self):
+        """would_create_match returns False when swap doesn't create match."""
+        board = Board(seed=42)
+        # Set up a situation with no possible match from swap
+        # Ensure entire row has alternating different types
+        board.set_candy(0, 0, Candy("virus", 0, 0))
+        board.set_candy(0, 1, Candy("lock", 0, 1))
+        board.set_candy(0, 2, Candy("key", 0, 2))
+        board.set_candy(0, 3, Candy("defcon", 0, 3))
+        board.set_candy(0, 4, Candy("ronin", 0, 4))
+        board.set_candy(0, 5, Candy("blackhat", 0, 5))
+        board.set_candy(0, 6, Candy("virus", 0, 6))
+        board.set_candy(0, 7, Candy("lock", 0, 7))
+        # Also set row 1 with different types to prevent vertical matches
+        board.set_candy(1, 0, Candy("defcon", 1, 0))
+        board.set_candy(1, 1, Candy("ronin", 1, 1))
+
+        # Swapping (0,0) and (0,1) won't create 3+ in a row
+        result = board.would_create_match(0, 0, 0, 1)
+        assert result is False
+
+    def test_shuffle_randomizes_board(self):
+        """shuffle() randomizes candy positions."""
+        board = Board(seed=42)
+        # Get initial state
+        initial_types = []
+        for row in range(board.rows):
+            for col in range(board.cols):
+                initial_types.append((row, col, board.get_candy(row, col).candy_type))
+
+        board.shuffle()
+
+        # Get new state
+        new_types = []
+        for row in range(board.rows):
+            for col in range(board.cols):
+                new_types.append((row, col, board.get_candy(row, col).candy_type))
+
+        # At least some positions should have different candy types
+        differences = sum(1 for i, n in zip(initial_types, new_types) if i[2] != n[2])
+        assert differences > 0, "Shuffle didn't change anything"

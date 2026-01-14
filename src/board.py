@@ -311,3 +311,94 @@ class Board:
                     self._grid[row][col] = None
                     cleared += 1
         return cleared
+
+    def would_create_match(self, r1: int, c1: int, r2: int, c2: int) -> bool:
+        """
+        Check if swapping two positions would create a match.
+
+        Args:
+            r1, c1: First position
+            r2, c2: Second position
+
+        Returns:
+            True if swap would create a match
+        """
+        # Perform swap
+        self.swap(r1, c1, r2, c2)
+
+        # Check for matches
+        matches = self.find_matches()
+        has_match = len(matches) > 0
+
+        # Undo swap
+        self.swap(r1, c1, r2, c2)
+
+        return has_match
+
+    def find_valid_moves(self) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+        """
+        Find all valid moves (swaps that create matches).
+
+        Returns:
+            List of ((r1,c1), (r2,c2)) tuples representing valid swaps
+        """
+        valid_moves = []
+
+        for row in range(self.rows):
+            for col in range(self.cols):
+                # Check swap with right neighbor
+                if col < self.cols - 1:
+                    if self.would_create_match(row, col, row, col + 1):
+                        valid_moves.append(((row, col), (row, col + 1)))
+
+                # Check swap with bottom neighbor
+                if row < self.rows - 1:
+                    if self.would_create_match(row, col, row + 1, col):
+                        valid_moves.append(((row, col), (row + 1, col)))
+
+        return valid_moves
+
+    def has_valid_moves(self) -> bool:
+        """Check if any valid moves exist."""
+        for row in range(self.rows):
+            for col in range(self.cols):
+                if col < self.cols - 1:
+                    if self.would_create_match(row, col, row, col + 1):
+                        return True
+                if row < self.rows - 1:
+                    if self.would_create_match(row, col, row + 1, col):
+                        return True
+        return False
+
+    def shuffle(self) -> None:
+        """Shuffle the board while avoiding immediate matches."""
+        # Collect all candies
+        candies = []
+        for row in range(self.rows):
+            for col in range(self.cols):
+                candy = self.get_candy(row, col)
+                if candy:
+                    candies.append(candy)
+                    self._grid[row][col] = None
+
+        # Shuffle and replace
+        random.shuffle(candies)
+
+        idx = 0
+        for row in range(self.rows):
+            for col in range(self.cols):
+                if idx < len(candies):
+                    self.set_candy(row, col, candies[idx])
+                    idx += 1
+
+        # If matches exist, shuffle again (up to 10 times)
+        for _ in range(10):
+            if not self.find_matches():
+                break
+            random.shuffle(candies)
+            idx = 0
+            for row in range(self.rows):
+                for col in range(self.cols):
+                    if idx < len(candies):
+                        self.set_candy(row, col, candies[idx])
+                        idx += 1
