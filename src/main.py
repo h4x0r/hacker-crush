@@ -108,7 +108,7 @@ class GameController:
         # Animate falls
         fall_count = len(fall_data)
         if fall_count > 0:
-            for i, (candy, from_row, to_row, col, _) in enumerate(fall_data):
+            for i, (candy, from_row, from_col, to_row, to_col) in enumerate(fall_data):
                 is_last = (i == fall_count - 1)
                 self.animations.add_fall(
                     candy, from_row, to_row,
