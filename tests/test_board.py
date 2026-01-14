@@ -286,3 +286,104 @@ class TestMatchClassification:
         match = {(0, 0), (0, 1), (0, 2), (1, 1), (2, 1)}
         result = board.classify_match(match)
         assert result["type"] == "wrapped"
+
+
+class TestGravity:
+    """Tests for gravity and board refill."""
+
+    def test_apply_gravity_single_gap(self):
+        """Candies fall down to fill single gap."""
+        board = Board(seed=42)
+        # Remember candy above the gap
+        candy_above = board.get_candy(0, 0)
+
+        # Create gap at bottom
+        board.set_candy(7, 0, None)
+
+        # Apply gravity
+        board.apply_gravity()
+
+        # Candy should have fallen
+        assert board.get_candy(7, 0) is not None
+        # Top should be empty (will be refilled separately)
+        assert board.get_candy(0, 0) is None
+
+    def test_apply_gravity_multiple_gaps(self):
+        """Candies fall through multiple gaps."""
+        board = Board(seed=42)
+        candy_at_top = board.get_candy(0, 0)
+
+        # Create multiple gaps
+        board.set_candy(5, 0, None)
+        board.set_candy(6, 0, None)
+        board.set_candy(7, 0, None)
+
+        board.apply_gravity()
+
+        # Top 3 rows should be empty
+        assert board.get_candy(0, 0) is None
+        assert board.get_candy(1, 0) is None
+        assert board.get_candy(2, 0) is None
+
+        # Bottom should be filled with fallen candies
+        assert board.get_candy(7, 0) is not None
+        assert board.get_candy(6, 0) is not None
+        assert board.get_candy(5, 0) is not None
+
+    def test_refill_board(self):
+        """Empty cells at top are refilled with new candies."""
+        board = Board(seed=42)
+
+        # Create gaps and apply gravity
+        board.set_candy(7, 0, None)
+        board.set_candy(7, 1, None)
+        board.apply_gravity()
+
+        # Refill
+        board.refill()
+
+        # All cells should have candies
+        for row in range(board.rows):
+            for col in range(board.cols):
+                assert board.get_candy(row, col) is not None
+
+    def test_gravity_updates_candy_positions(self):
+        """Falling candies have their position updated."""
+        board = Board(seed=42)
+        candy = board.get_candy(3, 2)
+        original_type = candy.candy_type
+
+        # Create gap below
+        board.set_candy(7, 2, None)
+        board.set_candy(6, 2, None)
+        board.set_candy(5, 2, None)
+        board.set_candy(4, 2, None)
+
+        board.apply_gravity()
+
+        # Find where the candy ended up
+        found = False
+        for row in range(board.rows):
+            c = board.get_candy(row, 2)
+            if c and c.candy_type == original_type and c is candy:
+                assert c.row == row
+                assert c.col == 2
+                found = True
+                break
+        assert found
+
+    def test_clear_matches_removes_candies(self):
+        """clear_matches removes candies at match positions."""
+        board = Board(seed=42)
+        # Set up a match
+        board.set_candy(0, 0, Candy("virus", 0, 0))
+        board.set_candy(0, 1, Candy("virus", 0, 1))
+        board.set_candy(0, 2, Candy("virus", 0, 2))
+
+        matches = board.find_matches()
+        cleared = board.clear_matches(matches)
+
+        assert cleared >= 3
+        assert board.get_candy(0, 0) is None
+        assert board.get_candy(0, 1) is None
+        assert board.get_candy(0, 2) is None

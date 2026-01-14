@@ -249,3 +249,65 @@ class Board:
         if (best_row, best_col) in match:
             return (best_row, best_col)
         return self._find_match_center(match)
+
+    def apply_gravity(self) -> List[Tuple[Candy, int, int, int, int]]:
+        """
+        Apply gravity - candies fall down to fill gaps.
+
+        Returns:
+            List of (candy, from_row, from_col, to_row, to_col) for animations
+        """
+        movements = []
+
+        for col in range(self.cols):
+            # Process column from bottom to top
+            write_row = self.rows - 1  # Where to place next candy
+
+            for read_row in range(self.rows - 1, -1, -1):
+                candy = self.get_candy(read_row, col)
+                if candy is not None:
+                    if read_row != write_row:
+                        # Move candy down
+                        movements.append((candy, read_row, col, write_row, col))
+                        self._grid[read_row][col] = None
+                        self.set_candy(write_row, col, candy)
+                    write_row -= 1
+
+        return movements
+
+    def refill(self) -> List[Tuple[Candy, int, int]]:
+        """
+        Fill empty cells at top with new candies.
+
+        Returns:
+            List of (candy, row, col) for new candies
+        """
+        new_candies = []
+
+        for col in range(self.cols):
+            for row in range(self.rows):
+                if self.get_candy(row, col) is None:
+                    candy_type = random.choice(CANDY_TYPES)
+                    candy = Candy(candy_type, row=row, col=col)
+                    self.set_candy(row, col, candy)
+                    new_candies.append((candy, row, col))
+
+        return new_candies
+
+    def clear_matches(self, matches: List[Set[Tuple[int, int]]]) -> int:
+        """
+        Clear matched candies from board.
+
+        Args:
+            matches: List of match sets to clear
+
+        Returns:
+            Number of candies cleared
+        """
+        cleared = 0
+        for match in matches:
+            for row, col in match:
+                if self.get_candy(row, col) is not None:
+                    self._grid[row][col] = None
+                    cleared += 1
+        return cleared
