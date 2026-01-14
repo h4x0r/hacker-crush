@@ -101,8 +101,9 @@ class Renderer:
         # Load candy sprites
         self.sprites = self._load_sprites()
 
-        # Load logo sprite (larger ronin)
-        self.logo = self._load_logo()
+        # Load logo sprites
+        self.logo = self._load_logo()  # Small in-game logo (ronin sprite)
+        self.menu_logo = self._load_menu_logo()  # Large menu logo
 
         # Fallback colors if sprites fail to load
         self.candy_colors = {
@@ -168,6 +169,23 @@ class Renderer:
             return img
         except Exception:
             return None
+
+    def _load_menu_logo(self) -> Optional[pygame.Surface]:
+        """Load Security Ronin logo for main menu from marketing assets."""
+        # Try the official marketing logo first
+        marketing_path = "/Users/4n6h4x0r/Sync/Marketing/Security Ronin/Logo - Security Ronin (against dark background).png"
+        try:
+            img = pygame.image.load(marketing_path).convert_alpha()
+            # Scale maintaining aspect ratio (target height ~80px for menu)
+            original_width, original_height = img.get_size()
+            target_height = 80
+            scale_factor = target_height / original_height
+            target_width = int(original_width * scale_factor)
+            img = pygame.transform.smoothscale(img, (target_width, target_height))
+            return img
+        except Exception:
+            # Fallback to in-game logo
+            return self.logo
 
     def _create_scanlines(self) -> pygame.Surface:
         """Create CRT scanline overlay effect."""
@@ -311,19 +329,16 @@ class Renderer:
         self.screen.blit(text, text_rect)
 
     def draw_hud_logo(self) -> None:
-        """Draw logo and game name in game HUD (clickable)."""
-        # Draw small logo in top-left corner next to score
+        """Draw logo in game HUD - positioned in top area to avoid grid overlap."""
+        # Grid extends from y=80 to y=592, so we put logo in top center
+        # between the score (left) and time/moves (right)
         if self.logo:
-            logo_size = 40
-            logo_x = WINDOW_WIDTH - logo_size - 20
-            logo_y = WINDOW_HEIGHT - logo_size - 20
+            logo_size = 32
+            logo_x = WINDOW_WIDTH // 2 - logo_size // 2
+            logo_y = 24
             self.screen.blit(pygame.transform.smoothscale(self.logo, (logo_size, logo_size)),
                            (logo_x, logo_y))
             self.game_logo_rect = pygame.Rect(logo_x, logo_y, logo_size, logo_size)
-
-            # Draw "HACKER CRUSH" text next to logo
-            name_text = self.small_font.render("HACKER CRUSH", True, (0, 100, 0))
-            self.screen.blit(name_text, (logo_x - 150, logo_y + 10))
         else:
             self.game_logo_rect = None
 
@@ -455,30 +470,38 @@ class Renderer:
             title: Menu title
         """
         # Draw Security Ronin logo (clickable)
-        if self.logo:
-            logo_size = 80
-            logo_scaled = pygame.transform.smoothscale(self.logo, (logo_size, logo_size))
-            logo_x = WINDOW_WIDTH // 2 - logo_size // 2
-            logo_y = 20
-            self.screen.blit(logo_scaled, (logo_x, logo_y))
+        logo_to_use = self.menu_logo or self.logo
+        logo_bottom = 10  # Default if no logo
+        if logo_to_use:
+            # Get actual logo dimensions and center it
+            logo_rect = logo_to_use.get_rect()
+            logo_x = WINDOW_WIDTH // 2 - logo_rect.width // 2
+            logo_y = 10
+            self.screen.blit(logo_to_use, (logo_x, logo_y))
             # Store logo rect for click detection
-            self.menu_logo_rect = pygame.Rect(logo_x, logo_y, logo_size, logo_size)
+            self.menu_logo_rect = pygame.Rect(logo_x, logo_y, logo_rect.width, logo_rect.height)
+            logo_bottom = logo_y + logo_rect.height
         else:
             self.menu_logo_rect = None
 
-        # Draw title with glitch effect
+        # Draw title with glitch effect (position below logo with gap)
         title_text = self.title_font.render(f"> {title}_", True, COLOR_PRIMARY)
-        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 130))
+        title_height = title_text.get_height()
+        title_y = logo_bottom + 10 + title_height // 2  # Gap + half title height for centering
+        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, title_y))
         self.screen.blit(title_text, title_rect)
 
         # Draw subtitle
         subtitle = self.small_font.render("[ SELECT OPERATION MODE ]", True, COLOR_ACCENT)
-        subtitle_rect = subtitle.get_rect(center=(WINDOW_WIDTH // 2, 175))
+        subtitle_rect = subtitle.get_rect(center=(WINDOW_WIDTH // 2, title_y + 35))
         self.screen.blit(subtitle, subtitle_rect)
 
-        # Draw options
-        start_y = 220
-        spacing = 80
+        # Draw options - calculate spacing to fit 3 options nicely
+        options_area_top = title_y + 60
+        options_area_bottom = WINDOW_HEIGHT - 70  # Leave room for controls
+        available_height = options_area_bottom - options_area_top
+        spacing = min(80, available_height // max(len(options), 1))
+        start_y = options_area_top
 
         for i, option in enumerate(options):
             y = start_y + i * spacing
