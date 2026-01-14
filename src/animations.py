@@ -39,6 +39,8 @@ class Animation:
     @property
     def progress(self) -> float:
         """Get animation progress from 0 to 1."""
+        if self.duration_ms <= 0:
+            return 1.0
         return min(1.0, self.elapsed_ms / self.duration_ms)
 
     @property
@@ -179,8 +181,8 @@ class AnimationManager:
         start_y = GRID_OFFSET_Y + from_row * CELL_SIZE + CELL_SIZE // 2
         end_y = GRID_OFFSET_Y + to_row * CELL_SIZE + CELL_SIZE // 2
 
-        distance = to_row - from_row
-        duration = ANIM_CANDY_FALL * distance
+        distance = abs(to_row - from_row)
+        duration = max(ANIM_CANDY_FALL * distance, 50)  # Minimum 50ms
 
         self.animations.append(Animation(
             anim_type=AnimationType.FALL,
