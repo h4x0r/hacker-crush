@@ -1,0 +1,1 @@
+"""Hacker Crush test suite."""
