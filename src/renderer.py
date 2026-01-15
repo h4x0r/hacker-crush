@@ -614,6 +614,160 @@ class Renderer:
             rect = text.get_rect(center=(WINDOW_WIDTH // 2, y + 15))
             self.screen.blit(text, rect)
 
+    def draw_leaderboard(self, entries: list, mode_name: str) -> None:
+        """
+        Draw leaderboard screen.
+
+        Args:
+            entries: List of LeaderboardEntry objects
+            mode_name: Display name of current mode filter
+        """
+        # Semi-transparent overlay
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+        overlay.set_alpha(230)
+        overlay.fill(COLOR_BG)
+        self.screen.blit(overlay, (0, 0))
+
+        # Title
+        title_text = self.title_font.render("> HIGH SCORES_", True, COLOR_PRIMARY)
+        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 60))
+        self.screen.blit(title_text, title_rect)
+
+        # Mode filter indicator
+        mode_text = self.small_font.render(f"[ {mode_name} ]  UP/DOWN to change", True, COLOR_ACCENT)
+        mode_rect = mode_text.get_rect(center=(WINDOW_WIDTH // 2, 100))
+        self.screen.blit(mode_text, mode_rect)
+
+        # Column headers
+        header_y = 140
+        self._draw_leaderboard_row("RANK", "HANDLE", "SCORE", "MODE", header_y, COLOR_ACCENT, is_header=True)
+
+        # Draw separator line
+        pygame.draw.line(self.screen, COLOR_GRID,
+                        (100, header_y + 25), (WINDOW_WIDTH - 100, header_y + 25), 1)
+
+        # Draw entries
+        if entries:
+            start_y = 175
+            row_height = 35
+            for i, entry in enumerate(entries[:10]):
+                y = start_y + i * row_height
+                rank_str = f"#{entry.rank if entry.rank else i + 1}"
+
+                # Highlight top 3
+                if i < 3:
+                    color = COLOR_PRIMARY
+                else:
+                    color = (0, 180, 0)
+
+                # Mode short names
+                mode_short = {
+                    "endless": "ZEN",
+                    "moves": "PRE",
+                    "timed": "SPD"
+                }.get(entry.mode, entry.mode[:3].upper())
+
+                self._draw_leaderboard_row(
+                    rank_str, entry.handle, str(entry.score), mode_short, y, color
+                )
+        else:
+            # No scores message
+            no_scores = self.font.render("NO SCORES YET", True, (80, 80, 80))
+            no_rect = no_scores.get_rect(center=(WINDOW_WIDTH // 2, 300))
+            self.screen.blit(no_scores, no_rect)
+
+            hint = self.small_font.render("Play a game to get on the board!", True, (60, 60, 60))
+            hint_rect = hint.get_rect(center=(WINDOW_WIDTH // 2, 340))
+            self.screen.blit(hint, hint_rect)
+
+        # Controls hint
+        controls = self.small_font.render("[ESC/ENTER] Back to Menu", True, (80, 80, 80))
+        controls_rect = controls.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 40))
+        self.screen.blit(controls, controls_rect)
+
+    def _draw_leaderboard_row(self, rank: str, handle: str, score: str, mode: str,
+                               y: int, color: tuple, is_header: bool = False) -> None:
+        """Draw a single leaderboard row."""
+        font = self.small_font if is_header else self.font
+
+        # Column positions
+        rank_x = 130
+        handle_x = 220
+        score_x = 480
+        mode_x = 620
+
+        rank_text = font.render(rank, True, color)
+        self.screen.blit(rank_text, (rank_x, y))
+
+        handle_text = font.render(handle[:12], True, color)
+        self.screen.blit(handle_text, (handle_x, y))
+
+        score_text = font.render(score, True, color)
+        score_rect = score_text.get_rect(right=score_x, top=y)
+        self.screen.blit(score_text, score_rect)
+
+        mode_text = font.render(mode, True, color)
+        self.screen.blit(mode_text, (mode_x, y))
+
+    def draw_handle_input(self, handle: str, score: int, cursor_visible: bool) -> None:
+        """
+        Draw handle input screen for high score entry.
+
+        Args:
+            handle: Current handle input
+            score: Score being submitted
+            cursor_visible: Whether to show blinking cursor
+        """
+        # Semi-transparent overlay
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+        overlay.set_alpha(230)
+        overlay.fill(COLOR_BG)
+        self.screen.blit(overlay, (0, 0))
+
+        # Title
+        title_text = self.title_font.render("> NEW HIGH SCORE!_", True, COLOR_PRIMARY)
+        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, 120))
+        self.screen.blit(title_text, title_rect)
+
+        # Score display
+        score_text = self.font.render(f"SCORE: {score}", True, COLOR_ACCENT)
+        score_rect = score_text.get_rect(center=(WINDOW_WIDTH // 2, 180))
+        self.screen.blit(score_text, score_rect)
+
+        # Prompt
+        prompt = self.font.render("ENTER YOUR HANDLE:", True, COLOR_WHITE)
+        prompt_rect = prompt.get_rect(center=(WINDOW_WIDTH // 2, 260))
+        self.screen.blit(prompt, prompt_rect)
+
+        # Input box
+        box_width = 350
+        box_height = 60
+        box_x = (WINDOW_WIDTH - box_width) // 2
+        box_y = 300
+        pygame.draw.rect(self.screen, COLOR_PRIMARY, (box_x, box_y, box_width, box_height), 2)
+
+        # Handle text with cursor
+        cursor = "_" if cursor_visible else " "
+        display_handle = handle + cursor
+        handle_text = self.title_font.render(display_handle, True, COLOR_PRIMARY)
+        handle_rect = handle_text.get_rect(center=(WINDOW_WIDTH // 2, box_y + box_height // 2))
+        self.screen.blit(handle_text, handle_rect)
+
+        # Character count
+        count_text = self.small_font.render(f"{len(handle)}/12 chars (min 2)", True, (80, 80, 80))
+        count_rect = count_text.get_rect(center=(WINDOW_WIDTH // 2, box_y + box_height + 25))
+        self.screen.blit(count_text, count_rect)
+
+        # Valid characters hint
+        valid_text = self.small_font.render("A-Z, 0-9, _ and - allowed", True, (60, 60, 60))
+        valid_rect = valid_text.get_rect(center=(WINDOW_WIDTH // 2, box_y + box_height + 50))
+        self.screen.blit(valid_text, valid_rect)
+
+        # Controls
+        controls = self.small_font.render("[ENTER] Submit   [ESC] Skip", True, COLOR_ACCENT)
+        controls_rect = controls.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 80))
+        self.screen.blit(controls, controls_rect)
+
     def quit(self) -> None:
         """Clean up Pygame."""
         pygame.quit()

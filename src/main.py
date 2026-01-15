@@ -17,6 +17,7 @@ from audio import AudioManager
 from animations import AnimationManager
 from menu import Menu, MenuState
 from particles import ParticleSystem
+from leaderboard import get_client, LeaderboardEntry
 from constants import MODE_ENDLESS, MODE_MOVES, MODE_TIMED, CELL_SIZE, GRID_OFFSET_X, GRID_OFFSET_Y
 
 
@@ -220,7 +221,12 @@ async def main():
     renderer = Renderer()
     audio = AudioManager()
     menu = Menu()
+    leaderboard = get_client()
     game = None
+
+    # Pending score submission
+    pending_score = 0
+    pending_mode = MODE_ENDLESS
 
     # Drag state
     dragging = False
@@ -236,6 +242,9 @@ async def main():
         delta = renderer.tick()
         delta_ms = delta * 1000
 
+        # Update cursor blink for handle input
+        menu.update_cursor(delta)
+
         # Handle events based on current state
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -248,6 +257,35 @@ async def main():
                 elif event.key == pygame.K_s:
                     audio.toggle_sfx()
 
+                # Handle input mode - text entry
+                elif menu.state == MenuState.ENTERING_HANDLE:
+                    if event.key == pygame.K_RETURN:
+                        result = menu.confirm()
+                        if result == "handle_confirmed":
+                            # Submit score to leaderboard
+                            entry = LeaderboardEntry(
+                                handle=menu.handle_input,
+                                score=pending_score,
+                                mode=pending_mode
+                            )
+                            leaderboard.submit_score(entry)
+                            audio.play("match_big")  # Success sound
+                    elif event.key == pygame.K_ESCAPE:
+                        menu.cancel_handle_entry()
+                    elif event.key == pygame.K_BACKSPACE:
+                        menu.handle_backspace()
+                    elif event.unicode and event.unicode.isprintable():
+                        menu.handle_text_input(event.unicode)
+
+                # Leaderboard navigation
+                elif menu.state == MenuState.LEADERBOARD:
+                    if event.key in (pygame.K_ESCAPE, pygame.K_RETURN):
+                        menu.confirm()  # Returns to main menu
+                    elif event.key == pygame.K_UP:
+                        menu.navigate_up()
+                    elif event.key == pygame.K_DOWN:
+                        menu.navigate_down()
+
                 # Menu navigation
                 elif menu.state == MenuState.MAIN_MENU:
                     if event.key == pygame.K_UP:
@@ -255,10 +293,10 @@ async def main():
                     elif event.key == pygame.K_DOWN:
                         menu.navigate_down()
                     elif event.key == pygame.K_RETURN:
-                        mode = menu.confirm()
+                        result = menu.confirm()
                         if menu.state == MenuState.GAME_STARTING:
                             game = GameController()
-                            game.state = GameState(mode)
+                            game.state = GameState(result)
                             game.renderer = renderer
                             game.audio = audio
                             dragging = False
@@ -286,7 +324,11 @@ async def main():
                 elif menu.state == MenuState.GAME_STARTING and game:
                     if event.key == pygame.K_ESCAPE:
                         if game.state.is_game_over:
-                            menu.show_game_over(game.state.score)
+                            # Check for high score
+                            is_high = leaderboard.is_high_score(game.state.score, game.state.mode)
+                            pending_score = game.state.score
+                            pending_mode = game.state.mode
+                            menu.show_game_over(game.state.score, is_high_score=is_high)
                         else:
                             # Return to main menu
                             menu.reset()
@@ -341,10 +383,10 @@ async def main():
                         item_y = start_y + i * spacing - 10
                         if box_x <= mx <= box_x + box_width and item_y <= my <= item_y + box_height:
                             menu.selected_index = i
-                            mode = menu.confirm()
+                            result = menu.confirm()
                             if menu.state == MenuState.GAME_STARTING:
                                 game = GameController()
-                                game.state = GameState(mode)
+                                game.state = GameState(result)
                                 game.renderer = renderer
                                 game.audio = audio
                                 dragging = False
@@ -424,17 +466,38 @@ async def main():
                 game.state.update_time(delta)
                 if game.state.is_game_over:
                     audio.play("game_over")
-                    menu.show_game_over(game.state.score)
+                    # Check for high score
+                    is_high = leaderboard.is_high_score(game.state.score, game.state.mode)
+                    pending_score = game.state.score
+                    pending_mode = game.state.mode
+                    menu.show_game_over(game.state.score, is_high_score=is_high)
 
             # Check for game over transition
-            if game.state.is_game_over and menu.state != MenuState.GAME_OVER:
-                menu.show_game_over(game.state.score)
+            if game.state.is_game_over and menu.state != MenuState.GAME_OVER and menu.state != MenuState.ENTERING_HANDLE:
+                # Check for high score
+                is_high = leaderboard.is_high_score(game.state.score, game.state.mode)
+                pending_score = game.state.score
+                pending_mode = game.state.mode
+                menu.show_game_over(game.state.score, is_high_score=is_high)
 
         # Render
         renderer.clear()
 
         if menu.state == MenuState.MAIN_MENU:
             renderer.draw_menu(menu.get_options(), menu.selected_index)
+
+        elif menu.state == MenuState.LEADERBOARD:
+            # Get leaderboard entries for current mode filter
+            mode_filter = menu.get_current_leaderboard_mode()
+            entries = leaderboard.get_leaderboard(mode=mode_filter, limit=10)
+            renderer.draw_leaderboard(entries, menu.get_current_leaderboard_mode_name())
+
+        elif menu.state == MenuState.ENTERING_HANDLE:
+            # Draw game in background
+            if game:
+                renderer.draw_grid()
+                game.draw_board_animated()
+            renderer.draw_handle_input(menu.handle_input, menu.final_score, menu.handle_cursor_visible)
 
         elif menu.state == MenuState.GAME_STARTING and game:
             renderer.draw_grid()

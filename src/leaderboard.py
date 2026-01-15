@@ -1,13 +1,28 @@
-"""Leaderboard client for score submission and retrieval."""
+"""Dreamlo leaderboard client for score submission and retrieval."""
 
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Optional, Dict, Any
+
+try:
+    import urllib.request
+    import urllib.parse
+    HAS_URLLIB = True
+except ImportError:
+    HAS_URLLIB = False
 
 from constants import MODE_ENDLESS, MODE_MOVES, MODE_TIMED
 
+
+# Dreamlo configuration
+# Get your own keys at https://dreamlo.com/
+# Free tier is HTTP only; $5 donation unlocks HTTPS
+DREAMLO_PUBLIC_KEY = os.environ.get("DREAMLO_PUBLIC_KEY", "696848b68f40bccf80e13a19")
+DREAMLO_PRIVATE_KEY = os.environ.get("DREAMLO_PRIVATE_KEY", "REDACTED_USE_ENV_VAR")
+DREAMLO_BASE_URL = "https://dreamlo.com/lb"
 
 # Maximum reasonable score (anti-cheat)
 MAX_SCORE = 5_000_000
@@ -19,6 +34,7 @@ class LeaderboardEntry:
     handle: str
     score: int
     mode: str
+    seconds: int = 0
     rank: int = 0
     timestamp: str = ""
 
@@ -28,6 +44,7 @@ class LeaderboardEntry:
             "handle": self.handle,
             "score": self.score,
             "mode": self.mode,
+            "seconds": self.seconds,
             "rank": self.rank,
             "timestamp": self.timestamp
         }
@@ -39,22 +56,42 @@ class LeaderboardEntry:
             handle=data.get("handle", ""),
             score=data.get("score", 0),
             mode=data.get("mode", MODE_ENDLESS),
+            seconds=data.get("seconds", 0),
             rank=data.get("rank", 0),
             timestamp=data.get("timestamp", "")
         )
 
+    @classmethod
+    def from_dreamlo(cls, data: Dict[str, Any], rank: int = 0) -> "LeaderboardEntry":
+        """Create entry from Dreamlo API response."""
+        # Dreamlo returns: name, score, seconds, text, date
+        mode = data.get("text", MODE_ENDLESS)
+        return cls(
+            handle=data.get("name", "???"),
+            score=int(data.get("score", 0)),
+            mode=mode,
+            seconds=int(data.get("seconds", 0)),
+            rank=rank,
+            timestamp=data.get("date", "")
+        )
+
 
 class LeaderboardClient:
-    """Client for leaderboard operations."""
+    """Client for Dreamlo leaderboard operations."""
 
-    def __init__(self, api_url: str = None):
+    def __init__(self, private_key: str = None, public_key: str = None):
         """
         Initialize leaderboard client.
 
         Args:
-            api_url: Base URL for API (None for local-only mode)
+            private_key: Dreamlo private key (for writes)
+            public_key: Dreamlo public key (for reads)
         """
-        self.api_url = api_url
+        self.private_key = private_key or DREAMLO_PRIVATE_KEY
+        self.public_key = public_key or DREAMLO_PUBLIC_KEY
+        self.base_url = DREAMLO_BASE_URL
+
+        # Local cache/fallback
         self._local_scores: Dict[str, List[LeaderboardEntry]] = {
             MODE_ENDLESS: [],
             MODE_MOVES: [],
@@ -64,6 +101,10 @@ class LeaderboardClient:
             os.path.dirname(__file__), "..", "data", "local_scores.json"
         )
         self._load_local()
+
+    def is_configured(self) -> bool:
+        """Check if Dreamlo keys are configured."""
+        return bool(self.private_key and self.public_key)
 
     def validate_handle(self, handle: str) -> bool:
         """
@@ -75,11 +116,16 @@ class LeaderboardClient:
         Returns:
             True if valid
         """
-        if len(handle) < 3 or len(handle) > 12:
+        if len(handle) < 2 or len(handle) > 12:
             return False
 
-        # Only alphanumeric and underscore
-        if not re.match(r'^[a-zA-Z0-9_]+$', handle):
+        # Only alphanumeric, underscore, dash
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', handle):
+            return False
+
+        # No reserved/offensive words (basic filter)
+        banned = ["admin", "root", "system", "null"]
+        if handle.lower() in banned:
             return False
 
         return True
@@ -100,25 +146,9 @@ class LeaderboardClient:
             return False
         return True
 
-    def format_submit_request(self, entry: LeaderboardEntry) -> Dict[str, Any]:
+    def submit_score(self, entry: LeaderboardEntry) -> Optional[int]:
         """
-        Format entry for API submission.
-
-        Args:
-            entry: Entry to format
-
-        Returns:
-            Request data dict
-        """
-        return {
-            "handle": entry.handle,
-            "score": entry.score,
-            "mode": entry.mode
-        }
-
-    async def submit_score(self, entry: LeaderboardEntry) -> Optional[int]:
-        """
-        Submit score to leaderboard.
+        Submit score to Dreamlo leaderboard.
 
         Args:
             entry: Entry to submit
@@ -132,71 +162,136 @@ class LeaderboardClient:
         if not self.validate_score(entry.score):
             return None
 
-        # Always save locally
-        self.save_local(entry)
+        # Always save locally first
+        self._save_local(entry)
 
-        # If API available, try to submit
-        if self.api_url:
+        # Try Dreamlo if configured
+        if self.is_configured() and HAS_URLLIB:
             try:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    data = self.format_submit_request(entry)
-                    async with session.post(
-                        f"{self.api_url}/api/scores",
-                        json=data
-                    ) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            return result.get("rank")
-            except Exception:
-                pass  # Fall back to local
+                # Dreamlo add format: /add/{name}/{score}/{seconds}/{text}
+                # Using mode as the "text" field
+                # Add timestamp to handle to make unique per submission
+                unique_handle = f"{entry.handle}"
 
-        # Return local rank
-        local = self.get_local_scores(entry.mode)
-        for i, e in enumerate(local):
-            if e.handle == entry.handle and e.score == entry.score:
-                return i + 1
-        return None
+                url = (
+                    f"{self.base_url}/{self.private_key}/add/"
+                    f"{urllib.parse.quote(unique_handle)}/"
+                    f"{entry.score}/"
+                    f"{entry.seconds}/"
+                    f"{urllib.parse.quote(entry.mode)}"
+                )
 
-    async def get_leaderboard(self, mode: str, limit: int = 10) -> List[LeaderboardEntry]:
+                req = urllib.request.Request(url, method='GET')
+                req.add_header('User-Agent', 'HackerCrush/1.0')
+
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200:
+                        # Get rank from local cache
+                        return self._get_local_rank(entry)
+
+            except Exception as e:
+                print(f"Dreamlo submit failed: {e}")
+
+        # Return local rank as fallback
+        return self._get_local_rank(entry)
+
+    def get_leaderboard(self, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
         """
-        Get leaderboard entries.
+        Get leaderboard entries from Dreamlo.
 
         Args:
-            mode: Game mode
+            mode: Game mode to filter (None for all)
             limit: Max entries to return
 
         Returns:
             List of leaderboard entries
         """
-        # If API available, try to fetch
-        if self.api_url:
-            try:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"{self.api_url}/api/scores",
-                        params={"mode": mode, "limit": limit}
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            return [LeaderboardEntry.from_dict(d) for d in data]
-            except Exception:
-                pass
+        entries = []
 
-        # Return local scores
+        # Try Dreamlo if configured
+        if self.is_configured() and HAS_URLLIB:
+            try:
+                url = f"{self.base_url}/{self.public_key}/json"
+
+                req = urllib.request.Request(url, method='GET')
+                req.add_header('User-Agent', 'HackerCrush/1.0')
+
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200:
+                        data = json.loads(response.read().decode('utf-8'))
+
+                        # Dreamlo returns {"dreamlo":{"leaderboard":{"entry":[...]}}}
+                        leaderboard = data.get("dreamlo", {}).get("leaderboard", {})
+                        raw_entries = leaderboard.get("entry", [])
+
+                        # Handle single entry (not wrapped in list)
+                        if isinstance(raw_entries, dict):
+                            raw_entries = [raw_entries]
+
+                        # Parse and filter
+                        rank = 1
+                        for raw in raw_entries:
+                            entry = LeaderboardEntry.from_dreamlo(raw, rank)
+                            if mode is None or entry.mode == mode:
+                                entries.append(entry)
+                                rank += 1
+                                if len(entries) >= limit:
+                                    break
+
+                        if entries:
+                            return entries
+
+            except Exception as e:
+                print(f"Dreamlo fetch failed: {e}")
+
+        # Fallback to local scores
         return self.get_local_scores(mode)[:limit]
 
-    def save_local(self, entry: LeaderboardEntry) -> None:
+    def get_local_scores(self, mode: str = None) -> List[LeaderboardEntry]:
         """
-        Save entry to local storage.
+        Get local scores.
 
         Args:
-            entry: Entry to save
+            mode: Game mode (None for all modes combined)
+
+        Returns:
+            List of local entries
         """
+        if mode:
+            return self._local_scores.get(mode, [])
+
+        # Combine all modes, sort by score
+        all_scores = []
+        for m in [MODE_ENDLESS, MODE_MOVES, MODE_TIMED]:
+            all_scores.extend(self._local_scores.get(m, []))
+        all_scores.sort(key=lambda e: e.score, reverse=True)
+        return all_scores
+
+    def is_high_score(self, score: int, mode: str) -> bool:
+        """
+        Check if score qualifies for leaderboard.
+
+        Args:
+            score: Score to check
+            mode: Game mode
+
+        Returns:
+            True if score would make top 10
+        """
+        local = self.get_local_scores(mode)
+        if len(local) < 10:
+            return score > 0
+        return score > local[-1].score
+
+    def _save_local(self, entry: LeaderboardEntry) -> None:
+        """Save entry to local storage."""
         mode = entry.mode
         if mode not in self._local_scores:
             self._local_scores[mode] = []
+
+        # Add timestamp if missing
+        if not entry.timestamp:
+            entry.timestamp = datetime.now().isoformat()
 
         self._local_scores[mode].append(entry)
 
@@ -210,19 +305,15 @@ class LeaderboardClient:
         for i, e in enumerate(self._local_scores[mode]):
             e.rank = i + 1
 
-        self._save_local()
+        self._persist_local()
 
-    def get_local_scores(self, mode: str) -> List[LeaderboardEntry]:
-        """
-        Get local scores for a mode.
-
-        Args:
-            mode: Game mode
-
-        Returns:
-            List of local entries
-        """
-        return self._local_scores.get(mode, [])
+    def _get_local_rank(self, entry: LeaderboardEntry) -> Optional[int]:
+        """Get rank for an entry in local scores."""
+        local = self.get_local_scores(entry.mode)
+        for i, e in enumerate(local):
+            if e.handle == entry.handle and e.score == entry.score:
+                return i + 1
+        return None
 
     def clear_local(self) -> None:
         """Clear all local scores."""
@@ -231,7 +322,7 @@ class LeaderboardClient:
             MODE_MOVES: [],
             MODE_TIMED: []
         }
-        self._save_local()
+        self._persist_local()
 
     def _load_local(self) -> None:
         """Load local scores from file."""
@@ -247,7 +338,7 @@ class LeaderboardClient:
         except Exception:
             pass
 
-    def _save_local(self) -> None:
+    def _persist_local(self) -> None:
         """Save local scores to file."""
         try:
             os.makedirs(os.path.dirname(self._local_file), exist_ok=True)
@@ -255,6 +346,18 @@ class LeaderboardClient:
             for mode, entries in self._local_scores.items():
                 data[mode] = [e.to_dict() for e in entries]
             with open(self._local_file, 'w') as f:
-                json.dump(data, f)
+                json.dump(data, f, indent=2)
         except Exception:
             pass
+
+
+# Singleton instance
+_client: Optional[LeaderboardClient] = None
+
+
+def get_client() -> LeaderboardClient:
+    """Get the leaderboard client singleton."""
+    global _client
+    if _client is None:
+        _client = LeaderboardClient()
+    return _client
