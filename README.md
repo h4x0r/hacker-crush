@@ -8,6 +8,8 @@ A cybersecurity-themed match-3 puzzle game inspired by Candy Crush, featuring a 
 
 **[Play Now in Browser](https://h4x0r.github.io/hacker-crush/)** | **[Download Desktop Version](#installation)**
 
+![Hacker Crush Web Version](docs/web.png)
+
 ---
 
 ## Architecture Highlights
