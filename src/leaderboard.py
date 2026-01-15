@@ -1,16 +1,32 @@
-"""Leaderboard client using Cloudflare Worker proxy (no local storage)."""
+"""Leaderboard client using Cloudflare Worker proxy (no local storage).
+
+Supports both native Python (urllib) and WASM/browser (platform.window.fetch).
+"""
 
 import json
 import re
+import sys
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 
-try:
-    import urllib.request
-    import urllib.parse
-    HAS_URLLIB = True
-except ImportError:
+# Detect if running in web/WASM environment
+IS_WEB = sys.platform in ('emscripten', 'wasi')
+
+if IS_WEB:
+    try:
+        from platform import window
+        HAS_WEB_FETCH = True
+    except ImportError:
+        HAS_WEB_FETCH = False
     HAS_URLLIB = False
+else:
+    HAS_WEB_FETCH = False
+    try:
+        import urllib.request
+        import urllib.parse
+        HAS_URLLIB = True
+    except ImportError:
+        HAS_URLLIB = False
 
 from constants import MODE_ENDLESS, MODE_MOVES, MODE_TIMED
 
@@ -20,6 +36,11 @@ LEADERBOARD_API_URL = "https://hacker-crush-leaderboard.securityronin.workers.de
 
 # Maximum reasonable score (anti-cheat)
 MAX_SCORE = 5_000_000
+
+# Cache for leaderboard data (refreshed on fetch)
+_cached_entries: List["LeaderboardEntry"] = []
+_fetch_in_progress = False
+_last_submit_result: Optional[bool] = None
 
 
 @dataclass
@@ -70,6 +91,33 @@ class LeaderboardEntry:
         )
 
 
+def _parse_leaderboard_response(data: Dict, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
+    """Parse Dreamlo API response into LeaderboardEntry objects."""
+    # Dreamlo returns {"dreamlo":{"leaderboard":{"entry":[...]}}}
+    leaderboard = data.get("dreamlo", {}).get("leaderboard", {})
+    if not leaderboard:
+        return []
+
+    raw_entries = leaderboard.get("entry", [])
+
+    # Handle single entry (not wrapped in list)
+    if isinstance(raw_entries, dict):
+        raw_entries = [raw_entries]
+
+    # Parse and filter
+    entries = []
+    rank = 1
+    for raw in raw_entries:
+        entry = LeaderboardEntry.from_dreamlo(raw, rank)
+        if mode is None or entry.mode == mode:
+            entries.append(entry)
+            rank += 1
+            if len(entries) >= limit:
+                break
+
+    return entries
+
+
 class LeaderboardClient:
     """Client for leaderboard operations via Cloudflare Worker."""
 
@@ -78,34 +126,15 @@ class LeaderboardClient:
         self.api_url = LEADERBOARD_API_URL
 
     def validate_handle(self, handle: str) -> bool:
-        """
-        Validate a player handle (client-side check).
-
-        Args:
-            handle: Handle to validate
-
-        Returns:
-            True if valid
-        """
+        """Validate a player handle (client-side check)."""
         if len(handle) < 2 or len(handle) > 12:
             return False
-
-        # Only alphanumeric, underscore, dash
         if not re.match(r'^[a-zA-Z0-9_\-]+$', handle):
             return False
-
         return True
 
     def validate_score(self, score: int) -> bool:
-        """
-        Validate a score (basic anti-cheat).
-
-        Args:
-            score: Score to validate
-
-        Returns:
-            True if score is reasonable
-        """
+        """Validate a score (basic anti-cheat)."""
         if score < 0:
             return False
         if score > MAX_SCORE:
@@ -115,22 +144,21 @@ class LeaderboardClient:
     def submit_score(self, entry: LeaderboardEntry) -> bool:
         """
         Submit score via Cloudflare Worker.
-
-        Args:
-            entry: Entry to submit
-
-        Returns:
-            True if successful, False if failed
+        For web builds, this initiates an async fetch - check submit_in_progress().
         """
-        # Validate first
         if not self.validate_handle(entry.handle):
             return False
         if not self.validate_score(entry.score):
             return False
 
-        if not HAS_URLLIB:
-            return False
+        if IS_WEB and HAS_WEB_FETCH:
+            return self._submit_score_web(entry)
+        elif HAS_URLLIB:
+            return self._submit_score_native(entry)
+        return False
 
+    def _submit_score_native(self, entry: LeaderboardEntry) -> bool:
+        """Submit score using urllib (native Python)."""
         try:
             url = f"{self.api_url}/scores"
             payload = json.dumps({
@@ -157,20 +185,70 @@ class LeaderboardClient:
             print(f"Leaderboard submit failed: {e}")
             return False
 
+    def _submit_score_web(self, entry: LeaderboardEntry) -> bool:
+        """Submit score using JavaScript fetch (web/WASM)."""
+        global _fetch_in_progress, _last_submit_result
+
+        try:
+            url = f"{self.api_url}/scores"
+            payload = json.dumps({
+                "handle": entry.handle,
+                "score": entry.score,
+                "seconds": entry.seconds,
+                "mode": entry.mode
+            })
+
+            _fetch_in_progress = True
+            _last_submit_result = None
+
+            # Use JavaScript fetch via pygbag's window object
+            def on_success(response):
+                global _fetch_in_progress, _last_submit_result
+                _fetch_in_progress = False
+                _last_submit_result = response.ok
+                print(f"Leaderboard submit: {'success' if response.ok else 'failed'}")
+
+            def on_error(error):
+                global _fetch_in_progress, _last_submit_result
+                _fetch_in_progress = False
+                _last_submit_result = False
+                print(f"Leaderboard submit error: {error}")
+
+            # Create fetch options
+            options = window.Object.new()
+            options.method = "POST"
+            options.headers = window.Object.new()
+            options.headers["Content-Type"] = "application/json"
+            options.headers["User-Agent"] = "HackerCrush/1.0"
+            options.body = payload
+
+            # Execute fetch with promise handlers
+            promise = window.fetch(url, options)
+            promise.then(on_success).catch(on_error)
+
+            return True  # Request initiated (async)
+
+        except Exception as e:
+            print(f"Leaderboard submit failed (web): {e}")
+            _fetch_in_progress = False
+            return False
+
     def get_leaderboard(self, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
         """
         Get leaderboard entries via Cloudflare Worker.
-
-        Args:
-            mode: Game mode to filter (None for all)
-            limit: Max entries to return
-
-        Returns:
-            List of leaderboard entries (empty list if fetch fails)
+        For web builds, returns cached data and initiates async refresh.
         """
-        if not HAS_URLLIB:
-            return []
+        global _cached_entries
 
+        if IS_WEB and HAS_WEB_FETCH:
+            self._fetch_leaderboard_web(mode, limit)
+            return _cached_entries
+        elif HAS_URLLIB:
+            return self._fetch_leaderboard_native(mode, limit)
+        return []
+
+    def _fetch_leaderboard_native(self, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
+        """Fetch leaderboard using urllib (native Python)."""
         try:
             url = f"{self.api_url}/scores"
 
@@ -180,48 +258,68 @@ class LeaderboardClient:
             with urllib.request.urlopen(req, timeout=5) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode('utf-8'))
-
-                    # Dreamlo returns {"dreamlo":{"leaderboard":{"entry":[...]}}}
-                    leaderboard = data.get("dreamlo", {}).get("leaderboard", {})
-                    if not leaderboard:
-                        return []
-
-                    raw_entries = leaderboard.get("entry", [])
-
-                    # Handle single entry (not wrapped in list)
-                    if isinstance(raw_entries, dict):
-                        raw_entries = [raw_entries]
-
-                    # Parse and filter
-                    entries = []
-                    rank = 1
-                    for raw in raw_entries:
-                        entry = LeaderboardEntry.from_dreamlo(raw, rank)
-                        if mode is None or entry.mode == mode:
-                            entries.append(entry)
-                            rank += 1
-                            if len(entries) >= limit:
-                                break
-
-                    return entries
+                    return _parse_leaderboard_response(data, mode, limit)
 
         except Exception as e:
             print(f"Leaderboard fetch failed: {e}")
 
         return []
 
+    def _fetch_leaderboard_web(self, mode: str = None, limit: int = 10) -> None:
+        """Fetch leaderboard using JavaScript fetch (web/WASM)."""
+        global _fetch_in_progress, _cached_entries
+
+        if _fetch_in_progress:
+            return  # Already fetching
+
+        try:
+            url = f"{self.api_url}/scores"
+            _fetch_in_progress = True
+
+            def on_response(response):
+                if response.ok:
+                    response.json().then(on_json).catch(on_error)
+                else:
+                    on_error(f"HTTP {response.status}")
+
+            def on_json(data):
+                global _fetch_in_progress, _cached_entries
+                _fetch_in_progress = False
+                # Convert JS object to Python dict
+                try:
+                    # pygbag should auto-convert, but handle edge cases
+                    if hasattr(data, 'to_py'):
+                        data = data.to_py()
+                    _cached_entries = _parse_leaderboard_response(data, mode, limit)
+                    print(f"Leaderboard loaded: {len(_cached_entries)} entries")
+                except Exception as e:
+                    print(f"Leaderboard parse error: {e}")
+                    _cached_entries = []
+
+            def on_error(error):
+                global _fetch_in_progress
+                _fetch_in_progress = False
+                print(f"Leaderboard fetch error: {error}")
+
+            # Execute fetch
+            promise = window.fetch(url)
+            promise.then(on_response).catch(on_error)
+
+        except Exception as e:
+            print(f"Leaderboard fetch failed (web): {e}")
+            _fetch_in_progress = False
+
     def is_high_score(self, score: int, mode: str) -> bool:
-        """
-        Check if score qualifies for leaderboard (any score > 0 qualifies).
-
-        Args:
-            score: Score to check
-            mode: Game mode
-
-        Returns:
-            True if score is worth submitting
-        """
+        """Check if score qualifies for leaderboard (any score > 0 qualifies)."""
         return score > 0
+
+    def get_cached_entries(self) -> List[LeaderboardEntry]:
+        """Get cached leaderboard entries (for web async pattern)."""
+        return _cached_entries
+
+    def is_fetch_in_progress(self) -> bool:
+        """Check if a fetch is currently in progress."""
+        return _fetch_in_progress
 
 
 # Singleton instance
