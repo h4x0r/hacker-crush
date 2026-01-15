@@ -241,26 +241,28 @@ def generate_combo():
 
 
 def generate_invalid():
-    """Rejection - dark denial tone."""
-    duration = 0.25
+    """Rejection - dark denial tone, louder and more noticeable."""
+    duration = 0.3
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Low dissonant tone (not harsh buzz)
-    freq = 80
+    # Low dissonant tone (not harsh buzz) - raised frequency for audibility
+    freq = 120
     audio = np.sin(2 * np.pi * freq * t)
-    # Dissonant interval
-    audio += np.sin(2 * np.pi * freq * 1.06 * t) * 0.7  # Minor second
+    # Dissonant interval - tritone for that "wrong" feel
+    audio += np.sin(2 * np.pi * freq * 1.414 * t) * 0.8  # Tritone
+    # Add subtle higher harmonic for presence
+    audio += np.sin(2 * np.pi * freq * 2 * t) * 0.3
 
-    # Filter heavily
-    audio = lowpass_filter(audio, 300)
+    # Less aggressive filter - allow more presence
+    audio = lowpass_filter(audio, 500)
 
-    # Two pulses
-    pulse1 = np.exp(-((t - 0.05) ** 2) / 0.002)
-    pulse2 = np.exp(-((t - 0.15) ** 2) / 0.002)
-    audio *= (pulse1 + pulse2 * 0.7)
+    # Two pulses - longer and fuller
+    pulse1 = np.exp(-((t - 0.06) ** 2) / 0.004)
+    pulse2 = np.exp(-((t - 0.18) ** 2) / 0.004)
+    audio *= (pulse1 + pulse2 * 0.8)
 
-    audio = add_reverb(audio, 0.3, 3)
-    return normalize(audio[:int(SAMPLE_RATE * 0.35)], 0.6)
+    audio = add_reverb(audio, 0.35, 4)
+    return normalize(audio[:int(SAMPLE_RATE * 0.4)], 0.85)  # Louder normalization
 
 
 def generate_game_over():

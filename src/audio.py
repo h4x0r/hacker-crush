@@ -70,11 +70,24 @@ class AudioManager:
             sound.play()
 
     def play_match(self, candy_count: int) -> None:
-        """Play match sound based on match size."""
+        """Play match sound based on match size with volume scaling."""
+        if not self.sfx_enabled:
+            return
+
+        # Select sound based on match size
         if candy_count >= 5:
-            self.play("match_big")
+            sound = self.sounds.get("match_big")
         else:
-            self.play("match")
+            sound = self.sounds.get("match")
+
+        if sound:
+            # Scale volume with match size: 3=base, 4=+20%, 5=+40%, 6+=+60%
+            volume_multiplier = 1.0 + max(0, (candy_count - 3) * 0.2)
+            volume_multiplier = min(volume_multiplier, 1.6)  # Cap at 160%
+            sound.set_volume(min(1.0, self.sfx_volume * volume_multiplier))
+            sound.play()
+            # Reset to base volume after playing
+            sound.set_volume(self.sfx_volume)
 
     def play_special(self, special_type: str) -> None:
         """Play sound for special candy activation."""

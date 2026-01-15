@@ -89,11 +89,12 @@ class GameController:
             self.state.add_match_score(len(match), cascade_level)
             self.audio.play_match(len(match))
 
-            # Emit particles for each candy in match
+            # Emit particles for each candy in match (scaled by match size)
+            match_size = len(match)
             for (row, col) in match:
                 px = GRID_OFFSET_X + col * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_OFFSET_Y + row * CELL_SIZE + CELL_SIZE // 2
-                self.particles.emit_match_effect(px, py)
+                self.particles.emit_match_effect(px, py, match_size=match_size)
 
             # Check for special candy creation
             classification = self.state.board.classify_match(match)

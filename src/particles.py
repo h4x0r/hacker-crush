@@ -120,15 +120,33 @@ class ParticleSystem:
             )
             self.particles.append(particle)
 
-    def emit_match_effect(self, x: float, y: float) -> None:
+    def emit_match_effect(self, x: float, y: float, match_size: int = 3) -> None:
         """
-        Emit particles for a match at position.
+        Emit particles for a match at position, scaling with match size.
 
         Args:
             x: X position
             y: Y position
+            match_size: Number of candies in the match (more = more spectacular)
         """
-        self.emit_sparks(x, y, count=8)
+        # Scale particle count with match size: 3=8, 4=12, 5=18, 6+=24+
+        base_count = 8
+        if match_size >= 6:
+            spark_count = 24 + (match_size - 6) * 4
+            binary_count = 8
+        elif match_size >= 5:
+            spark_count = 18
+            binary_count = 5
+        elif match_size >= 4:
+            spark_count = 12
+            binary_count = 3
+        else:
+            spark_count = base_count
+            binary_count = 0
+
+        self.emit_sparks(x, y, count=spark_count)
+        if binary_count > 0:
+            self.emit_binary(x, y, count=binary_count)
 
     def emit_special_effect(self, x: float, y: float) -> None:
         """
