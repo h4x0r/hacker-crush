@@ -401,8 +401,56 @@ class Renderer:
                 text_surface = self._particle_font.render(particle.char, True, (r, g, b))
                 text_surface.set_alpha(alpha)
                 self.screen.blit(text_surface, (int(particle.x), int(particle.y)))
+
+            elif particle.particle_type == ParticleType.RING:
+                # Expanding ring effect - size grows with age
+                progress = particle.age / particle.lifetime if particle.lifetime > 0 else 0
+                current_radius = int(particle.size + progress * 80)  # Expands from 20 to 100
+                thickness = max(1, int(4 * (1 - progress)))  # Thins as it expands
+
+                ring_size = current_radius * 2 + 10
+                ring_surface = pygame.Surface((ring_size, ring_size), pygame.SRCALPHA)
+                pygame.draw.circle(ring_surface, (r, g, b, alpha),
+                                 (ring_size // 2, ring_size // 2), current_radius, thickness)
+                self.screen.blit(ring_surface,
+                               (int(particle.x - ring_size // 2), int(particle.y - ring_size // 2)))
+
+            elif particle.particle_type == ParticleType.GLOW:
+                # Large pulsing glow orb
+                progress = particle.age / particle.lifetime if particle.lifetime > 0 else 0
+                # Pulse size up then down
+                pulse = 1 + 0.3 * (1 - abs(progress - 0.5) * 2)
+                current_size = int(particle.size * pulse)
+
+                glow_size = current_size * 4
+                glow_surface = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+
+                # Multiple layers for intense glow
+                for i, mult in enumerate([3, 2, 1.5, 1]):
+                    layer_alpha = int(alpha * (0.15 + i * 0.2))
+                    radius = int(current_size * mult)
+                    pygame.draw.circle(glow_surface, (r, g, b, layer_alpha),
+                                     (glow_size // 2, glow_size // 2), radius)
+
+                self.screen.blit(glow_surface,
+                               (int(particle.x - glow_size // 2), int(particle.y - glow_size // 2)))
+
+            elif particle.particle_type == ParticleType.DATA_STREAM:
+                # Fast horizontal data streaks with trail
+                if not hasattr(self, '_stream_font'):
+                    self._stream_font = self._load_font(12)
+
+                # Draw character with motion blur trail
+                trail_length = 3
+                for i in range(trail_length):
+                    trail_alpha = int(alpha * (1 - i * 0.3))
+                    offset = i * 8 * (-1 if particle.vx > 0 else 1)
+                    text_surface = self._stream_font.render(particle.char, True, (r, g, b))
+                    text_surface.set_alpha(trail_alpha)
+                    self.screen.blit(text_surface, (int(particle.x + offset), int(particle.y)))
+
             else:
-                # Draw as glowing circle
+                # Draw as glowing circle (SPARK, EXPLOSION)
                 size = particle.size
 
                 # Outer glow (larger, more transparent)

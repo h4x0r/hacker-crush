@@ -11,6 +11,9 @@ class ParticleType(Enum):
     SPARK = auto()
     BINARY = auto()
     EXPLOSION = auto()
+    RING = auto()         # Expanding ring effect
+    GLOW = auto()         # Large glowing orb that fades
+    DATA_STREAM = auto()  # Fast horizontal data streaks
 
 
 @dataclass
@@ -46,6 +49,19 @@ class Particle:
             # Larger explosion particles
             self.color = (0, 255, 100)
             self.size = 6
+        elif self.particle_type == ParticleType.RING:
+            # Expanding ring - size grows over time
+            self.color = (0, 255, 150)
+            self.size = 20  # Starting radius
+        elif self.particle_type == ParticleType.GLOW:
+            # Large glowing orb
+            self.color = (100, 255, 100)
+            self.size = 30
+        elif self.particle_type == ParticleType.DATA_STREAM:
+            # Fast data streaks
+            self.color = (0, 255, 0)
+            self.size = 2
+            self.char = random.choice(['>', '|', '-', '=', '#'])
 
     @property
     def is_alive(self) -> bool:
@@ -120,33 +136,126 @@ class ParticleSystem:
             )
             self.particles.append(particle)
 
+    def emit_explosion(self, x: float, y: float, count: int = 20, speed: float = 150) -> None:
+        """
+        Emit explosion particles radiating outward.
+
+        Args:
+            x: X position
+            y: Y position
+            count: Number of particles
+            speed: Base speed of particles
+        """
+        import math
+        for i in range(count):
+            angle = (2 * math.pi * i) / count + random.uniform(-0.2, 0.2)
+            spd = speed * random.uniform(0.7, 1.3)
+            vx = math.cos(angle) * spd
+            vy = math.sin(angle) * spd
+            lifetime = random.uniform(0.4, 0.8)
+
+            particle = Particle(
+                x=x, y=y,
+                vx=vx, vy=vy,
+                particle_type=ParticleType.EXPLOSION,
+                lifetime=lifetime
+            )
+            self.particles.append(particle)
+
+    def emit_ring(self, x: float, y: float) -> None:
+        """
+        Emit an expanding ring effect.
+
+        Args:
+            x: X position
+            y: Y position
+        """
+        particle = Particle(
+            x=x, y=y,
+            vx=0, vy=0,
+            particle_type=ParticleType.RING,
+            lifetime=0.5
+        )
+        self.particles.append(particle)
+
+    def emit_glow(self, x: float, y: float) -> None:
+        """
+        Emit a large glowing orb that fades.
+
+        Args:
+            x: X position
+            y: Y position
+        """
+        particle = Particle(
+            x=x, y=y,
+            vx=0, vy=0,
+            particle_type=ParticleType.GLOW,
+            lifetime=0.6
+        )
+        self.particles.append(particle)
+
+    def emit_data_streams(self, x: float, y: float, count: int = 8) -> None:
+        """
+        Emit fast horizontal data stream particles.
+
+        Args:
+            x: X position
+            y: Y position
+            count: Number of streams
+        """
+        for _ in range(count):
+            # Fast horizontal movement (both directions)
+            direction = random.choice([-1, 1])
+            vx = direction * random.uniform(200, 400)
+            vy = random.uniform(-20, 20)
+            lifetime = random.uniform(0.3, 0.6)
+
+            particle = Particle(
+                x=x, y=y,
+                vx=vx, vy=vy,
+                particle_type=ParticleType.DATA_STREAM,
+                lifetime=lifetime
+            )
+            self.particles.append(particle)
+
     def emit_match_effect(self, x: float, y: float, match_size: int = 3) -> None:
         """
-        Emit particles for a match at position, scaling with match size.
+        Emit spectacular particles for a match, scaling dramatically with size.
 
         Args:
             x: X position
             y: Y position
             match_size: Number of candies in the match (more = more spectacular)
         """
-        # Scale particle count with match size: 3=8, 4=12, 5=18, 6+=24+
-        base_count = 8
-        if match_size >= 6:
-            spark_count = 24 + (match_size - 6) * 4
-            binary_count = 8
+        if match_size >= 7:
+            # MASSIVE match - full fireworks display
+            self.emit_glow(x, y)
+            self.emit_ring(x, y)
+            self.emit_explosion(x, y, count=30, speed=200)
+            self.emit_data_streams(x, y, count=12)
+            self.emit_sparks(x, y, count=30)
+            self.emit_binary(x, y, count=15)
+        elif match_size >= 6:
+            # Huge match - explosion with ring
+            self.emit_ring(x, y)
+            self.emit_explosion(x, y, count=24, speed=180)
+            self.emit_data_streams(x, y, count=8)
+            self.emit_sparks(x, y, count=24)
+            self.emit_binary(x, y, count=10)
         elif match_size >= 5:
-            spark_count = 18
-            binary_count = 5
+            # Big match - explosion effect
+            self.emit_glow(x, y)
+            self.emit_explosion(x, y, count=16, speed=150)
+            self.emit_sparks(x, y, count=18)
+            self.emit_binary(x, y, count=6)
         elif match_size >= 4:
-            spark_count = 12
-            binary_count = 3
+            # Good match - enhanced sparks + data streams
+            self.emit_sparks(x, y, count=14)
+            self.emit_data_streams(x, y, count=4)
+            self.emit_binary(x, y, count=3)
         else:
-            spark_count = base_count
-            binary_count = 0
-
-        self.emit_sparks(x, y, count=spark_count)
-        if binary_count > 0:
-            self.emit_binary(x, y, count=binary_count)
+            # Standard 3-match
+            self.emit_sparks(x, y, count=8)
 
     def emit_special_effect(self, x: float, y: float) -> None:
         """

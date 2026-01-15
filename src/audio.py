@@ -70,24 +70,59 @@ class AudioManager:
             sound.play()
 
     def play_match(self, candy_count: int) -> None:
-        """Play match sound based on match size with volume scaling."""
+        """Play layered match sounds - more candies = more exciting layered audio."""
         if not self.sfx_enabled:
             return
 
-        # Select sound based on match size
-        if candy_count >= 5:
-            sound = self.sounds.get("match_big")
-        else:
-            sound = self.sounds.get("match")
+        # Scale volume with match size
+        volume_multiplier = 1.0 + max(0, (candy_count - 3) * 0.15)
+        volume_multiplier = min(volume_multiplier, 1.5)
 
-        if sound:
-            # Scale volume with match size: 3=base, 4=+20%, 5=+40%, 6+=+60%
-            volume_multiplier = 1.0 + max(0, (candy_count - 3) * 0.2)
-            volume_multiplier = min(volume_multiplier, 1.6)  # Cap at 160%
-            sound.set_volume(min(1.0, self.sfx_volume * volume_multiplier))
-            sound.play()
-            # Reset to base volume after playing
-            sound.set_volume(self.sfx_volume)
+        if candy_count >= 7:
+            # MASSIVE match - layer ALL sounds for epic effect
+            for sound_name in ["match_big", "combo", "striped"]:
+                sound = self.sounds.get(sound_name)
+                if sound:
+                    sound.set_volume(min(1.0, self.sfx_volume * volume_multiplier))
+                    sound.play()
+                    sound.set_volume(self.sfx_volume)
+
+        elif candy_count >= 6:
+            # Huge match - layer match_big + combo
+            for sound_name in ["match_big", "combo"]:
+                sound = self.sounds.get(sound_name)
+                if sound:
+                    sound.set_volume(min(1.0, self.sfx_volume * volume_multiplier))
+                    sound.play()
+                    sound.set_volume(self.sfx_volume)
+
+        elif candy_count >= 5:
+            # Big match - match_big with boost
+            sound = self.sounds.get("match_big")
+            if sound:
+                sound.set_volume(min(1.0, self.sfx_volume * volume_multiplier))
+                sound.play()
+                sound.set_volume(self.sfx_volume)
+
+        elif candy_count >= 4:
+            # Good match - standard match + quiet combo undertone
+            sound = self.sounds.get("match")
+            if sound:
+                sound.set_volume(min(1.0, self.sfx_volume * volume_multiplier))
+                sound.play()
+                sound.set_volume(self.sfx_volume)
+            combo = self.sounds.get("combo")
+            if combo:
+                combo.set_volume(self.sfx_volume * 0.3)
+                combo.play()
+                combo.set_volume(self.sfx_volume)
+
+        else:
+            # Standard 3-match
+            sound = self.sounds.get("match")
+            if sound:
+                sound.set_volume(self.sfx_volume)
+                sound.play()
 
     def play_special(self, special_type: str) -> None:
         """Play sound for special candy activation."""
