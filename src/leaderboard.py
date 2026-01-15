@@ -1,4 +1,4 @@
-"""Dreamlo leaderboard client for score submission and retrieval."""
+"""Leaderboard client using Cloudflare Worker proxy."""
 
 import json
 import os
@@ -17,12 +17,8 @@ except ImportError:
 from constants import MODE_ENDLESS, MODE_MOVES, MODE_TIMED
 
 
-# Dreamlo configuration
-# Get your own keys at https://dreamlo.com/
-# Free tier is HTTP only; $5 donation unlocks HTTPS
-DREAMLO_PUBLIC_KEY = os.environ.get("DREAMLO_PUBLIC_KEY", "696848b68f40bccf80e13a19")
-DREAMLO_PRIVATE_KEY = os.environ.get("DREAMLO_PRIVATE_KEY", "REDACTED_USE_ENV_VAR")
-DREAMLO_BASE_URL = "https://dreamlo.com/lb"
+# Cloudflare Worker endpoint (proxies to Dreamlo, hides API keys)
+LEADERBOARD_API_URL = "https://hacker-crush-leaderboard.securityronin.workers.dev"
 
 # Maximum reasonable score (anti-cheat)
 MAX_SCORE = 5_000_000
@@ -77,19 +73,11 @@ class LeaderboardEntry:
 
 
 class LeaderboardClient:
-    """Client for Dreamlo leaderboard operations."""
+    """Client for leaderboard operations via Cloudflare Worker."""
 
-    def __init__(self, private_key: str = None, public_key: str = None):
-        """
-        Initialize leaderboard client.
-
-        Args:
-            private_key: Dreamlo private key (for writes)
-            public_key: Dreamlo public key (for reads)
-        """
-        self.private_key = private_key or DREAMLO_PRIVATE_KEY
-        self.public_key = public_key or DREAMLO_PUBLIC_KEY
-        self.base_url = DREAMLO_BASE_URL
+    def __init__(self):
+        """Initialize leaderboard client."""
+        self.api_url = LEADERBOARD_API_URL
 
         # Local cache/fallback
         self._local_scores: Dict[str, List[LeaderboardEntry]] = {
@@ -102,13 +90,9 @@ class LeaderboardClient:
         )
         self._load_local()
 
-    def is_configured(self) -> bool:
-        """Check if Dreamlo keys are configured."""
-        return bool(self.private_key and self.public_key)
-
     def validate_handle(self, handle: str) -> bool:
         """
-        Validate a player handle.
+        Validate a player handle (client-side check).
 
         Args:
             handle: Handle to validate
@@ -121,11 +105,6 @@ class LeaderboardClient:
 
         # Only alphanumeric, underscore, dash
         if not re.match(r'^[a-zA-Z0-9_\-]+$', handle):
-            return False
-
-        # No reserved/offensive words (basic filter)
-        banned = ["admin", "root", "system", "null"]
-        if handle.lower() in banned:
             return False
 
         return True
@@ -148,7 +127,7 @@ class LeaderboardClient:
 
     def submit_score(self, entry: LeaderboardEntry) -> Optional[int]:
         """
-        Submit score to Dreamlo leaderboard.
+        Submit score via Cloudflare Worker.
 
         Args:
             entry: Entry to submit
@@ -165,39 +144,40 @@ class LeaderboardClient:
         # Always save locally first
         self._save_local(entry)
 
-        # Try Dreamlo if configured
-        if self.is_configured() and HAS_URLLIB:
+        # Submit to Worker API
+        if HAS_URLLIB:
             try:
-                # Dreamlo add format: /add/{name}/{score}/{seconds}/{text}
-                # Using mode as the "text" field
-                # Add timestamp to handle to make unique per submission
-                unique_handle = f"{entry.handle}"
+                url = f"{self.api_url}/scores"
+                payload = json.dumps({
+                    "handle": entry.handle,
+                    "score": entry.score,
+                    "seconds": entry.seconds,
+                    "mode": entry.mode
+                }).encode('utf-8')
 
-                url = (
-                    f"{self.base_url}/{self.private_key}/add/"
-                    f"{urllib.parse.quote(unique_handle)}/"
-                    f"{entry.score}/"
-                    f"{entry.seconds}/"
-                    f"{urllib.parse.quote(entry.mode)}"
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    method='POST',
+                    headers={
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'HackerCrush/1.0'
+                    }
                 )
-
-                req = urllib.request.Request(url, method='GET')
-                req.add_header('User-Agent', 'HackerCrush/1.0')
 
                 with urllib.request.urlopen(req, timeout=5) as response:
                     if response.status == 200:
-                        # Get rank from local cache
                         return self._get_local_rank(entry)
 
             except Exception as e:
-                print(f"Dreamlo submit failed: {e}")
+                print(f"Leaderboard submit failed: {e}")
 
         # Return local rank as fallback
         return self._get_local_rank(entry)
 
     def get_leaderboard(self, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
         """
-        Get leaderboard entries from Dreamlo.
+        Get leaderboard entries via Cloudflare Worker.
 
         Args:
             mode: Game mode to filter (None for all)
@@ -208,10 +188,9 @@ class LeaderboardClient:
         """
         entries = []
 
-        # Try Dreamlo if configured
-        if self.is_configured() and HAS_URLLIB:
+        if HAS_URLLIB:
             try:
-                url = f"{self.base_url}/{self.public_key}/json"
+                url = f"{self.api_url}/scores"
 
                 req = urllib.request.Request(url, method='GET')
                 req.add_header('User-Agent', 'HackerCrush/1.0')
@@ -242,7 +221,7 @@ class LeaderboardClient:
                             return entries
 
             except Exception as e:
-                print(f"Dreamlo fetch failed: {e}")
+                print(f"Leaderboard fetch failed: {e}")
 
         # Fallback to local scores
         return self.get_local_scores(mode)[:limit]

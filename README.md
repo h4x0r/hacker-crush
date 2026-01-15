@@ -19,7 +19,7 @@ A cybersecurity-themed match-3 puzzle game inspired by Candy Crush, featuring a 
   - Endless - Play until no moves remain
   - Moves - Reach target score within limited moves
   - Timed - Race against the clock
-- **Leaderboard** - Track high scores locally or globally via Dreamlo
+- **Leaderboard** - Global high scores via Cloudflare Worker + Dreamlo
 
 ### Visuals
 - Matrix-style falling code rain background
@@ -78,7 +78,7 @@ hacker-crush/
 │   ├── audio.py         # Sound effect management
 │   ├── animations.py    # Swap and clear animations
 │   ├── particles.py     # Particle effects system
-│   ├── leaderboard.py   # Dreamlo leaderboard client
+│   ├── leaderboard.py   # Leaderboard client (Cloudflare Worker)
 │   └── constants.py     # Game configuration
 ├── assets/
 │   ├── images/          # Candy sprites and logo
@@ -109,22 +109,14 @@ The Matrix-style sound effects are procedurally generated:
 python scripts/generate_sounds.py
 ```
 
-### Leaderboard Configuration
+### Leaderboard
 
-The game includes local high score tracking by default. For global leaderboards, get free API keys from [Dreamlo](https://dreamlo.com/):
+Global leaderboard is powered by a Cloudflare Worker that proxies to Dreamlo. The Worker handles:
+- Server-side API key protection
+- Profanity filtering
+- Score validation
 
-```bash
-# Set environment variables before running
-export DREAMLO_PUBLIC_KEY="your_public_key"
-export DREAMLO_PRIVATE_KEY="your_private_key"
-
-# For HTTPS (requires $5 donation to Dreamlo)
-export DREAMLO_USE_HTTPS=1
-
-python src/main.py
-```
-
-Without Dreamlo keys, scores are saved locally to `data/local_scores.json`.
+Local scores are also saved to `data/local_scores.json` as fallback.
 
 ## Tech Stack
 
