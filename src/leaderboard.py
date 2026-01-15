@@ -1,10 +1,8 @@
-"""Leaderboard client using Cloudflare Worker proxy."""
+"""Leaderboard client using Cloudflare Worker proxy (no local storage)."""
 
 import json
-import os
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 try:
@@ -79,17 +77,6 @@ class LeaderboardClient:
         """Initialize leaderboard client."""
         self.api_url = LEADERBOARD_API_URL
 
-        # Local cache/fallback
-        self._local_scores: Dict[str, List[LeaderboardEntry]] = {
-            MODE_ENDLESS: [],
-            MODE_MOVES: [],
-            MODE_TIMED: []
-        }
-        self._local_file = os.path.join(
-            os.path.dirname(__file__), "..", "data", "local_scores.json"
-        )
-        self._load_local()
-
     def validate_handle(self, handle: str) -> bool:
         """
         Validate a player handle (client-side check).
@@ -125,7 +112,7 @@ class LeaderboardClient:
             return False
         return True
 
-    def submit_score(self, entry: LeaderboardEntry) -> Optional[int]:
+    def submit_score(self, entry: LeaderboardEntry) -> bool:
         """
         Submit score via Cloudflare Worker.
 
@@ -133,47 +120,42 @@ class LeaderboardClient:
             entry: Entry to submit
 
         Returns:
-            Rank if successful, None if failed
+            True if successful, False if failed
         """
         # Validate first
         if not self.validate_handle(entry.handle):
-            return None
+            return False
         if not self.validate_score(entry.score):
-            return None
+            return False
 
-        # Always save locally first
-        self._save_local(entry)
+        if not HAS_URLLIB:
+            return False
 
-        # Submit to Worker API
-        if HAS_URLLIB:
-            try:
-                url = f"{self.api_url}/scores"
-                payload = json.dumps({
-                    "handle": entry.handle,
-                    "score": entry.score,
-                    "seconds": entry.seconds,
-                    "mode": entry.mode
-                }).encode('utf-8')
+        try:
+            url = f"{self.api_url}/scores"
+            payload = json.dumps({
+                "handle": entry.handle,
+                "score": entry.score,
+                "seconds": entry.seconds,
+                "mode": entry.mode
+            }).encode('utf-8')
 
-                req = urllib.request.Request(
-                    url,
-                    data=payload,
-                    method='POST',
-                    headers={
-                        'Content-Type': 'application/json',
-                        'User-Agent': 'HackerCrush/1.0'
-                    }
-                )
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                method='POST',
+                headers={
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'HackerCrush/1.0'
+                }
+            )
 
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    if response.status == 200:
-                        return self._get_local_rank(entry)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                return response.status == 200
 
-            except Exception as e:
-                print(f"Leaderboard submit failed: {e}")
-
-        # Return local rank as fallback
-        return self._get_local_rank(entry)
+        except Exception as e:
+            print(f"Leaderboard submit failed: {e}")
+            return False
 
     def get_leaderboard(self, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
         """
@@ -184,150 +166,62 @@ class LeaderboardClient:
             limit: Max entries to return
 
         Returns:
-            List of leaderboard entries
+            List of leaderboard entries (empty list if fetch fails)
         """
-        entries = []
+        if not HAS_URLLIB:
+            return []
 
-        if HAS_URLLIB:
-            try:
-                url = f"{self.api_url}/scores"
+        try:
+            url = f"{self.api_url}/scores"
 
-                req = urllib.request.Request(url, method='GET')
-                req.add_header('User-Agent', 'HackerCrush/1.0')
+            req = urllib.request.Request(url, method='GET')
+            req.add_header('User-Agent', 'HackerCrush/1.0')
 
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    if response.status == 200:
-                        data = json.loads(response.read().decode('utf-8'))
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode('utf-8'))
 
-                        # Dreamlo returns {"dreamlo":{"leaderboard":{"entry":[...]}}}
-                        leaderboard = data.get("dreamlo", {}).get("leaderboard", {})
-                        raw_entries = leaderboard.get("entry", [])
+                    # Dreamlo returns {"dreamlo":{"leaderboard":{"entry":[...]}}}
+                    leaderboard = data.get("dreamlo", {}).get("leaderboard", {})
+                    if not leaderboard:
+                        return []
 
-                        # Handle single entry (not wrapped in list)
-                        if isinstance(raw_entries, dict):
-                            raw_entries = [raw_entries]
+                    raw_entries = leaderboard.get("entry", [])
 
-                        # Parse and filter
-                        rank = 1
-                        for raw in raw_entries:
-                            entry = LeaderboardEntry.from_dreamlo(raw, rank)
-                            if mode is None or entry.mode == mode:
-                                entries.append(entry)
-                                rank += 1
-                                if len(entries) >= limit:
-                                    break
+                    # Handle single entry (not wrapped in list)
+                    if isinstance(raw_entries, dict):
+                        raw_entries = [raw_entries]
 
-                        if entries:
-                            return entries
+                    # Parse and filter
+                    entries = []
+                    rank = 1
+                    for raw in raw_entries:
+                        entry = LeaderboardEntry.from_dreamlo(raw, rank)
+                        if mode is None or entry.mode == mode:
+                            entries.append(entry)
+                            rank += 1
+                            if len(entries) >= limit:
+                                break
 
-            except Exception as e:
-                print(f"Leaderboard fetch failed: {e}")
+                    return entries
 
-        # Fallback to local scores
-        return self.get_local_scores(mode)[:limit]
+        except Exception as e:
+            print(f"Leaderboard fetch failed: {e}")
 
-    def get_local_scores(self, mode: str = None) -> List[LeaderboardEntry]:
-        """
-        Get local scores.
-
-        Args:
-            mode: Game mode (None for all modes combined)
-
-        Returns:
-            List of local entries
-        """
-        if mode:
-            return self._local_scores.get(mode, [])
-
-        # Combine all modes, sort by score
-        all_scores = []
-        for m in [MODE_ENDLESS, MODE_MOVES, MODE_TIMED]:
-            all_scores.extend(self._local_scores.get(m, []))
-        all_scores.sort(key=lambda e: e.score, reverse=True)
-        return all_scores
+        return []
 
     def is_high_score(self, score: int, mode: str) -> bool:
         """
-        Check if score qualifies for leaderboard.
+        Check if score qualifies for leaderboard (any score > 0 qualifies).
 
         Args:
             score: Score to check
             mode: Game mode
 
         Returns:
-            True if score would make top 10
+            True if score is worth submitting
         """
-        local = self.get_local_scores(mode)
-        if len(local) < 10:
-            return score > 0
-        return score > local[-1].score
-
-    def _save_local(self, entry: LeaderboardEntry) -> None:
-        """Save entry to local storage."""
-        mode = entry.mode
-        if mode not in self._local_scores:
-            self._local_scores[mode] = []
-
-        # Add timestamp if missing
-        if not entry.timestamp:
-            entry.timestamp = datetime.now().isoformat()
-
-        self._local_scores[mode].append(entry)
-
-        # Sort by score descending
-        self._local_scores[mode].sort(key=lambda e: e.score, reverse=True)
-
-        # Keep only top 10
-        self._local_scores[mode] = self._local_scores[mode][:10]
-
-        # Assign ranks
-        for i, e in enumerate(self._local_scores[mode]):
-            e.rank = i + 1
-
-        self._persist_local()
-
-    def _get_local_rank(self, entry: LeaderboardEntry) -> Optional[int]:
-        """Get rank for an entry in local scores."""
-        local = self.get_local_scores(entry.mode)
-        for i, e in enumerate(local):
-            if e.handle == entry.handle and e.score == entry.score:
-                return i + 1
-        return None
-
-    def clear_local(self) -> None:
-        """Clear all local scores."""
-        self._local_scores = {
-            MODE_ENDLESS: [],
-            MODE_MOVES: [],
-            MODE_TIMED: []
-        }
-        self._persist_local()
-
-    def _load_local(self) -> None:
-        """Load local scores from file."""
-        try:
-            if os.path.exists(self._local_file):
-                with open(self._local_file, 'r') as f:
-                    data = json.load(f)
-                    for mode in [MODE_ENDLESS, MODE_MOVES, MODE_TIMED]:
-                        if mode in data:
-                            self._local_scores[mode] = [
-                                LeaderboardEntry.from_dict(d) for d in data[mode]
-                            ]
-        except Exception:
-            pass
-
-    def _persist_local(self) -> None:
-        """Save local scores to file."""
-        try:
-            os.makedirs(os.path.dirname(self._local_file), exist_ok=True)
-            data = {}
-            for mode, entries in self._local_scores.items():
-                data[mode] = [e.to_dict() for e in entries]
-            with open(self._local_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception:
-            pass
+        return score > 0
 
 
 # Singleton instance
