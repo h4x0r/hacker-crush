@@ -241,28 +241,32 @@ def generate_combo():
 
 
 def generate_invalid():
-    """Rejection - dark denial tone, louder and more noticeable."""
-    duration = 0.3
+    """Rejection - clear BEEP-BEEP-BEEP error pattern, unmistakably wrong."""
+    duration = 0.5
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
 
-    # Low dissonant tone (not harsh buzz) - raised frequency for audibility
-    freq = 120
+    # Higher frequency for clear audibility - classic error beep
+    freq = 480  # Sharp, attention-grabbing frequency
+
+    # Base tone with dissonance for "wrong" feel
     audio = np.sin(2 * np.pi * freq * t)
-    # Dissonant interval - tritone for that "wrong" feel
-    audio += np.sin(2 * np.pi * freq * 1.414 * t) * 0.8  # Tritone
-    # Add subtle higher harmonic for presence
-    audio += np.sin(2 * np.pi * freq * 2 * t) * 0.3
+    audio += np.sin(2 * np.pi * freq * 1.06 * t) * 0.5  # Minor second = tension
 
-    # Less aggressive filter - allow more presence
-    audio = lowpass_filter(audio, 500)
+    # THREE distinct beeps - universal "error" pattern
+    beep1 = np.exp(-((t - 0.08) ** 2) / 0.0008)
+    beep2 = np.exp(-((t - 0.22) ** 2) / 0.0008)
+    beep3 = np.exp(-((t - 0.36) ** 2) / 0.0008)
 
-    # Two pulses - longer and fuller
-    pulse1 = np.exp(-((t - 0.06) ** 2) / 0.004)
-    pulse2 = np.exp(-((t - 0.18) ** 2) / 0.004)
-    audio *= (pulse1 + pulse2 * 0.8)
+    envelope = beep1 + beep2 * 0.95 + beep3 * 0.9
+    audio *= envelope
 
-    audio = add_reverb(audio, 0.35, 4)
-    return normalize(audio[:int(SAMPLE_RATE * 0.4)], 0.85)  # Louder normalization
+    # Keep it sharp - minimal filtering
+    audio = lowpass_filter(audio, 3000)
+
+    # Minimal reverb for punchy sound
+    audio = add_reverb(audio, 0.15, 2)
+
+    return normalize(audio[:int(SAMPLE_RATE * 0.5)], 0.95)  # LOUD and clear
 
 
 def generate_game_over():
