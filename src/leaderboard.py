@@ -1,6 +1,6 @@
 """Leaderboard client using Cloudflare Worker proxy (no local storage).
 
-Supports both native Python (urllib) and WASM/browser (platform.window.fetch).
+Supports both native Python (urllib) and WASM/browser (platform.window JS interop).
 """
 
 import json
@@ -13,11 +13,9 @@ from typing import List, Optional, Dict, Any
 IS_WEB = sys.platform in ('emscripten', 'wasi')
 
 if IS_WEB:
-    try:
-        from platform import window
-        HAS_WEB_FETCH = True
-    except ImportError:
-        HAS_WEB_FETCH = False
+    import platform
+    import asyncio
+    HAS_WEB_FETCH = True
     HAS_URLLIB = False
 else:
     HAS_WEB_FETCH = False
@@ -40,7 +38,7 @@ MAX_SCORE = 5_000_000
 # Cache for leaderboard data (refreshed on fetch)
 _cached_entries: List["LeaderboardEntry"] = []
 _fetch_in_progress = False
-_last_submit_result: Optional[bool] = None
+_fetch_task = None
 
 
 @dataclass
@@ -118,6 +116,47 @@ def _parse_leaderboard_response(data: Dict, mode: str = None, limit: int = 10) -
     return entries
 
 
+def _js_xhr_get(url: str) -> Optional[str]:
+    """Execute synchronous XHR GET via JavaScript (pygbag interop)."""
+    # This uses platform.window to call browser's XMLHttpRequest
+    # Synchronous XHR is used for simplicity in game loop context
+    # The URL is hardcoded to our API endpoint, not user-supplied
+    js_code = """
+    (function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "%s", false);
+        xhr.send();
+        if (xhr.status === 200) {
+            return xhr.responseText;
+        }
+        return null;
+    })()
+    """ % url
+    try:
+        return platform.window.eval(js_code)
+    except Exception:
+        return None
+
+
+def _js_xhr_post(url: str, payload: str) -> int:
+    """Execute synchronous XHR POST via JavaScript (pygbag interop)."""
+    # Escapes payload for safe embedding in JS string
+    escaped_payload = payload.replace("\\", "\\\\").replace("'", "\\'")
+    js_code = """
+    (function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "%s", false);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send('%s');
+        return xhr.status;
+    })()
+    """ % (url, escaped_payload)
+    try:
+        return platform.window.eval(js_code)
+    except Exception:
+        return 0
+
+
 class LeaderboardClient:
     """Client for leaderboard operations via Cloudflare Worker."""
 
@@ -142,10 +181,7 @@ class LeaderboardClient:
         return True
 
     def submit_score(self, entry: LeaderboardEntry) -> bool:
-        """
-        Submit score via Cloudflare Worker.
-        For web builds, this initiates an async fetch - check submit_in_progress().
-        """
+        """Submit score via Cloudflare Worker."""
         if not self.validate_handle(entry.handle):
             return False
         if not self.validate_score(entry.score):
@@ -186,9 +222,7 @@ class LeaderboardClient:
             return False
 
     def _submit_score_web(self, entry: LeaderboardEntry) -> bool:
-        """Submit score using JavaScript fetch (web/WASM)."""
-        global _fetch_in_progress, _last_submit_result
-
+        """Submit score using JavaScript XHR (web/WASM)."""
         try:
             url = f"{self.api_url}/scores"
             payload = json.dumps({
@@ -198,51 +232,23 @@ class LeaderboardClient:
                 "mode": entry.mode
             })
 
-            _fetch_in_progress = True
-            _last_submit_result = None
-
-            # Use JavaScript fetch via pygbag's window object
-            def on_success(response):
-                global _fetch_in_progress, _last_submit_result
-                _fetch_in_progress = False
-                _last_submit_result = response.ok
-                print(f"Leaderboard submit: {'success' if response.ok else 'failed'}")
-
-            def on_error(error):
-                global _fetch_in_progress, _last_submit_result
-                _fetch_in_progress = False
-                _last_submit_result = False
-                print(f"Leaderboard submit error: {error}")
-
-            # Create fetch options
-            options = window.Object.new()
-            options.method = "POST"
-            options.headers = window.Object.new()
-            options.headers["Content-Type"] = "application/json"
-            options.headers["User-Agent"] = "HackerCrush/1.0"
-            options.body = payload
-
-            # Execute fetch with promise handlers
-            promise = window.fetch(url, options)
-            promise.then(on_success).catch(on_error)
-
-            return True  # Request initiated (async)
+            status = _js_xhr_post(url, payload)
+            print(f"Leaderboard submit status: {status}")
+            return status == 200
 
         except Exception as e:
             print(f"Leaderboard submit failed (web): {e}")
-            _fetch_in_progress = False
             return False
 
     def get_leaderboard(self, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
-        """
-        Get leaderboard entries via Cloudflare Worker.
-        For web builds, returns cached data and initiates async refresh.
-        """
+        """Get leaderboard entries via Cloudflare Worker."""
         global _cached_entries
 
         if IS_WEB and HAS_WEB_FETCH:
-            self._fetch_leaderboard_web(mode, limit)
-            return _cached_entries
+            entries = self._fetch_leaderboard_web(mode, limit)
+            if entries:
+                _cached_entries = entries
+            return _cached_entries if _cached_entries else []
         elif HAS_URLLIB:
             return self._fetch_leaderboard_native(mode, limit)
         return []
@@ -265,56 +271,31 @@ class LeaderboardClient:
 
         return []
 
-    def _fetch_leaderboard_web(self, mode: str = None, limit: int = 10) -> None:
-        """Fetch leaderboard using JavaScript fetch (web/WASM)."""
-        global _fetch_in_progress, _cached_entries
-
-        if _fetch_in_progress:
-            return  # Already fetching
-
+    def _fetch_leaderboard_web(self, mode: str = None, limit: int = 10) -> List[LeaderboardEntry]:
+        """Fetch leaderboard using JavaScript XHR (web/WASM)."""
         try:
             url = f"{self.api_url}/scores"
-            _fetch_in_progress = True
+            response_text = _js_xhr_get(url)
 
-            def on_response(response):
-                if response.ok:
-                    response.json().then(on_json).catch(on_error)
-                else:
-                    on_error(f"HTTP {response.status}")
-
-            def on_json(data):
-                global _fetch_in_progress, _cached_entries
-                _fetch_in_progress = False
-                # Convert JS object to Python dict
-                try:
-                    # pygbag should auto-convert, but handle edge cases
-                    if hasattr(data, 'to_py'):
-                        data = data.to_py()
-                    _cached_entries = _parse_leaderboard_response(data, mode, limit)
-                    print(f"Leaderboard loaded: {len(_cached_entries)} entries")
-                except Exception as e:
-                    print(f"Leaderboard parse error: {e}")
-                    _cached_entries = []
-
-            def on_error(error):
-                global _fetch_in_progress
-                _fetch_in_progress = False
-                print(f"Leaderboard fetch error: {error}")
-
-            # Execute fetch
-            promise = window.fetch(url)
-            promise.then(on_response).catch(on_error)
+            if response_text:
+                data = json.loads(response_text)
+                entries = _parse_leaderboard_response(data, mode, limit)
+                print(f"Leaderboard loaded: {len(entries)} entries")
+                return entries
+            else:
+                print("Leaderboard fetch: no response")
 
         except Exception as e:
             print(f"Leaderboard fetch failed (web): {e}")
-            _fetch_in_progress = False
+
+        return []
 
     def is_high_score(self, score: int, mode: str) -> bool:
         """Check if score qualifies for leaderboard (any score > 0 qualifies)."""
         return score > 0
 
     def get_cached_entries(self) -> List[LeaderboardEntry]:
-        """Get cached leaderboard entries (for web async pattern)."""
+        """Get cached leaderboard entries."""
         return _cached_entries
 
     def is_fetch_in_progress(self) -> bool:
